@@ -25,7 +25,7 @@ const sheets = google.sheets({ version: 'v4', auth });
 const drive = google.drive({ version: 'v3', auth });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const DRIVE_FOLDER_ID = process.env.DRIVE_FOLDER_ID;
+const DRIVE_FOLDER_ID = '186-mtpSHf_vAMzsdhRVOnO7u4qldCqJL';
 
 // --- HELPER FUNCTION: FORMAT TANGGAL ---
 const getTimestamp = () => format(new Date(), 'dd/MM/yyyy HH:mm:ss');
