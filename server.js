@@ -7,6 +7,20 @@ const stream = require('stream');
 const { format } = require('date-fns');
 
 const app = express();
+// --- TAMBAHAN DEBUGGING (Letakkan disini) ---
+try {
+    const keyPath = process.env.GOOGLE_KEY_FILE;
+    const creds = require(keyPath);
+    console.log("========================================");
+    console.log("SERVER BERJALAN SEBAGAI:");
+    console.log("Email:", creds.client_email);
+    console.log("Project ID:", creds.project_id);
+    console.log("Target Folder ID:", '186-mtpSHf_vAMzsdhRVOnO7u4qldCqJL'); // Sesuai hardcode Anda
+    console.log("========================================");
+} catch (e) {
+    console.error("GAGAL MEMBACA FILE KUNCI:", e.message);
+}
+// ---------------------------------------------
 const upload = multer({ storage: multer.memoryStorage() }); // Simpan file di RAM sementara
 
 app.use(cors()); // Agar bisa diakses dari Vercel
