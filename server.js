@@ -79,6 +79,19 @@ async function getOrCreateUploadFolder() {
             },
         });
 
+        // Share ke email admin agar bisa lihat di drive.google.com
+        const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'copilotsimops@gmail.com';
+        await drive.permissions.create({
+            fileId: folderId,
+            requestBody: {
+                role: 'writer',
+                type: 'user',
+                emailAddress: ADMIN_EMAIL,
+            },
+            sendNotificationEmail: false,
+        });
+        console.log('Folder di-share ke:', ADMIN_EMAIL);
+
         return folderId;
     } catch (error) {
         console.error('Error get/create folder:', error.message);
