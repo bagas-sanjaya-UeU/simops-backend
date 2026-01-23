@@ -39,7 +39,62 @@ const sheets = google.sheets({ version: 'v4', auth });
 const drive = google.drive({ version: 'v3', auth });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const DRIVE_FOLDER_ID = '186-mtpSHf_vAMzsdhRVOnO7u4qldCqJL';
+let DRIVE_FOLDER_ID = null; // Akan di-set saat server start
+
+// --- HELPER: Get or Create Upload Folder ---
+async function getOrCreateUploadFolder() {
+    const FOLDER_NAME = 'SimOps_Uploads';
+
+    try {
+        // Cari folder yang sudah ada
+        const searchRes = await drive.files.list({
+            q: `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+            fields: 'files(id,name)',
+            spaces: 'drive',
+        });
+
+        if (searchRes.data.files && searchRes.data.files.length > 0) {
+            console.log('Folder ditemukan:', searchRes.data.files[0].id);
+            return searchRes.data.files[0].id;
+        }
+
+        // Buat folder baru jika belum ada
+        const createRes = await drive.files.create({
+            requestBody: {
+                name: FOLDER_NAME,
+                mimeType: 'application/vnd.google-apps.folder',
+            },
+            fields: 'id',
+        });
+
+        const folderId = createRes.data.id;
+        console.log('Folder baru dibuat:', folderId);
+
+        // Set permission agar folder bisa diakses siapa saja (untuk view)
+        await drive.permissions.create({
+            fileId: folderId,
+            requestBody: {
+                role: 'reader',
+                type: 'anyone',
+            },
+        });
+
+        return folderId;
+    } catch (error) {
+        console.error('Error get/create folder:', error.message);
+        throw error;
+    }
+}
+
+// Initialize folder on startup
+(async () => {
+    try {
+        DRIVE_FOLDER_ID = await getOrCreateUploadFolder();
+        console.log('Upload folder ready:', DRIVE_FOLDER_ID);
+    } catch (e) {
+        console.error('GAGAL INIT FOLDER:', e.message);
+    }
+})();
 
 // --- HELPER FUNCTION: FORMAT TANGGAL ---
 const getTimestamp = () => format(new Date(), 'dd/MM/yyyy HH:mm:ss');
@@ -141,30 +196,27 @@ app.post('/api/jobs', async (req, res) => {
 // Endpoint untuk test akses folder
 app.get('/api/test-drive', async (req, res) => {
     try {
-        // Test 1: Cek apakah bisa akses folder
-        const folderInfo = await drive.files.get({
-            fileId: DRIVE_FOLDER_ID,
-            fields: 'id,name,mimeType',
-            supportsAllDrives: true,
-        });
+        // Pastikan folder sudah di-init
+        if (!DRIVE_FOLDER_ID) {
+            DRIVE_FOLDER_ID = await getOrCreateUploadFolder();
+        }
 
-        // Test 2: List isi folder
+        // List isi folder
         const filesList = await drive.files.list({
-            q: `'${DRIVE_FOLDER_ID}' in parents`,
-            fields: 'files(id,name)',
-            supportsAllDrives: true,
-            includeItemsFromAllDrives: true,
+            q: `'${DRIVE_FOLDER_ID}' in parents and trashed=false`,
+            fields: 'files(id,name,webViewLink)',
+            spaces: 'drive',
         });
 
         res.json({
             status: 'OK',
-            folder: folderInfo.data,
+            folderId: DRIVE_FOLDER_ID,
+            folderUrl: `https://drive.google.com/drive/folders/${DRIVE_FOLDER_ID}`,
             files: filesList.data.files
         });
     } catch (error) {
         res.status(500).json({
             error: error.message,
-            hint: 'Pastikan folder sudah di-share ke service account email'
         });
     }
 });
@@ -176,13 +228,18 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
         if (!file) return res.status(400).send('No file uploaded.');
 
-        // 1. Upload ke Google Drive (HARUS ke shared folder, service account tidak punya quota sendiri)
+        // Pastikan folder sudah di-init
+        if (!DRIVE_FOLDER_ID) {
+            DRIVE_FOLDER_ID = await getOrCreateUploadFolder();
+        }
+
+        // 1. Upload ke Google Drive
         const bufferStream = new stream.PassThrough();
         bufferStream.end(file.buffer);
 
         const driveRes = await drive.files.create({
             requestBody: {
-                name: `${idPekerjaan}_${jenisDokumen}`,
+                name: `${idPekerjaan}_${jenisDokumen}_${Date.now()}`,
                 parents: [DRIVE_FOLDER_ID],
             },
             media: {
@@ -190,8 +247,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
                 body: bufferStream,
             },
             fields: 'id',
-            supportsAllDrives: true,
-            supportsTeamDrives: true,
         });
 
         const fileId = driveRes.data.id;
@@ -203,7 +258,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
                 role: 'reader',
                 type: 'anyone',
             },
-            supportsAllDrives: true,
         });
 
         const fileUrl = `https://drive.google.com/file/d/${fileId}/view`;
@@ -218,8 +272,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
             }
         });
 
-        // 3. Update Status di Sheet DataPekerjaan (Kolom M / Index 12)
-        // Kita perlu mencari baris mana yang punya ID tersebut
+        // 3. Update Status di Sheet DataPekerjaan
         await updateStatusPekerjaan(idPekerjaan, 12, "Dokumen Terupload");
 
         res.json({ message: 'Berhasil upload', url: fileUrl });
