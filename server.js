@@ -138,6 +138,37 @@ app.post('/api/jobs', async (req, res) => {
 // 3. UPLOAD FILE (Ke Drive & Sheet)
 // ==========================================
 
+// Endpoint untuk test akses folder
+app.get('/api/test-drive', async (req, res) => {
+    try {
+        // Test 1: Cek apakah bisa akses folder
+        const folderInfo = await drive.files.get({
+            fileId: DRIVE_FOLDER_ID,
+            fields: 'id,name,mimeType',
+            supportsAllDrives: true,
+        });
+
+        // Test 2: List isi folder
+        const filesList = await drive.files.list({
+            q: `'${DRIVE_FOLDER_ID}' in parents`,
+            fields: 'files(id,name)',
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+        });
+
+        res.json({
+            status: 'OK',
+            folder: folderInfo.data,
+            files: filesList.data.files
+        });
+    } catch (error) {
+        res.status(500).json({
+            error: error.message,
+            hint: 'Pastikan folder sudah di-share ke service account email'
+        });
+    }
+});
+
 app.post('/api/upload', upload.single('file'), async (req, res) => {
     try {
         const { idPekerjaan, jenisDokumen } = req.body;
@@ -145,57 +176,35 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
         if (!file) return res.status(400).send('No file uploaded.');
 
-        // 1. Upload ke Google Drive
+        // 1. Upload ke Google Drive (HARUS ke shared folder, service account tidak punya quota sendiri)
         const bufferStream = new stream.PassThrough();
         bufferStream.end(file.buffer);
 
-        let driveRes;
-        let fileId;
+        const driveRes = await drive.files.create({
+            requestBody: {
+                name: `${idPekerjaan}_${jenisDokumen}`,
+                parents: [DRIVE_FOLDER_ID],
+            },
+            media: {
+                mimeType: file.mimetype,
+                body: bufferStream,
+            },
+            fields: 'id',
+            supportsAllDrives: true,
+            supportsTeamDrives: true,
+        });
 
-        try {
-            // Coba upload langsung ke folder target
-            driveRes = await drive.files.create({
-                requestBody: {
-                    name: `${idPekerjaan}_${jenisDokumen}`,
-                    parents: [DRIVE_FOLDER_ID],
-                },
-                media: {
-                    mimeType: file.mimetype,
-                    body: bufferStream,
-                },
-                fields: 'id',
-                supportsAllDrives: true,
-            });
-            fileId = driveRes.data.id;
-        } catch (folderError) {
-            console.log("Upload ke folder gagal, upload ke root:", folderError.message);
+        const fileId = driveRes.data.id;
 
-            // Reset stream karena sudah dipakai
-            const bufferStream2 = new stream.PassThrough();
-            bufferStream2.end(file.buffer);
-
-            // Upload ke root service account dulu
-            driveRes = await drive.files.create({
-                requestBody: {
-                    name: `${idPekerjaan}_${jenisDokumen}`,
-                },
-                media: {
-                    mimeType: file.mimetype,
-                    body: bufferStream2,
-                },
-                fields: 'id',
-            });
-            fileId = driveRes.data.id;
-
-            // Set permission agar bisa diakses
-            await drive.permissions.create({
-                fileId: fileId,
-                requestBody: {
-                    role: 'reader',
-                    type: 'anyone',
-                },
-            });
-        }
+        // Set permission agar file bisa diakses siapa saja
+        await drive.permissions.create({
+            fileId: fileId,
+            requestBody: {
+                role: 'reader',
+                type: 'anyone',
+            },
+            supportsAllDrives: true,
+        });
 
         const fileUrl = `https://drive.google.com/file/d/${fileId}/view`;
 
