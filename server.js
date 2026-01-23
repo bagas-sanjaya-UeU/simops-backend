@@ -149,20 +149,54 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         const bufferStream = new stream.PassThrough();
         bufferStream.end(file.buffer);
 
-        const driveRes = await drive.files.create({
-            requestBody: {
-                name: `${idPekerjaan}_${jenisDokumen}`,
-                parents: [DRIVE_FOLDER_ID],
-            },
-            media: {
-                mimeType: file.mimetype,
-                body: bufferStream,
-            },
-            fields: 'id',
-            supportsAllDrives: true,
-        });
+        let driveRes;
+        let fileId;
 
-        const fileId = driveRes.data.id;
+        try {
+            // Coba upload langsung ke folder target
+            driveRes = await drive.files.create({
+                requestBody: {
+                    name: `${idPekerjaan}_${jenisDokumen}`,
+                    parents: [DRIVE_FOLDER_ID],
+                },
+                media: {
+                    mimeType: file.mimetype,
+                    body: bufferStream,
+                },
+                fields: 'id',
+                supportsAllDrives: true,
+            });
+            fileId = driveRes.data.id;
+        } catch (folderError) {
+            console.log("Upload ke folder gagal, upload ke root:", folderError.message);
+
+            // Reset stream karena sudah dipakai
+            const bufferStream2 = new stream.PassThrough();
+            bufferStream2.end(file.buffer);
+
+            // Upload ke root service account dulu
+            driveRes = await drive.files.create({
+                requestBody: {
+                    name: `${idPekerjaan}_${jenisDokumen}`,
+                },
+                media: {
+                    mimeType: file.mimetype,
+                    body: bufferStream2,
+                },
+                fields: 'id',
+            });
+            fileId = driveRes.data.id;
+
+            // Set permission agar bisa diakses
+            await drive.permissions.create({
+                fileId: fileId,
+                requestBody: {
+                    role: 'reader',
+                    type: 'anyone',
+                },
+            });
+        }
+
         const fileUrl = `https://drive.google.com/file/d/${fileId}/view`;
 
         // 2. Simpan Link ke Sheet DokumenIzin
