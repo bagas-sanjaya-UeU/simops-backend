@@ -150,14 +150,16 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         bufferStream.end(file.buffer);
 
         const driveRes = await drive.files.create({
-            media: {
-                mimeType: file.mimetype,
-                body: bufferStream,
-            },
             requestBody: {
                 name: `${idPekerjaan}_${jenisDokumen}`,
                 parents: [DRIVE_FOLDER_ID],
             },
+            media: {
+                mimeType: file.mimetype,
+                body: bufferStream,
+            },
+            fields: 'id',
+            supportsAllDrives: true,
         });
 
         const fileId = driveRes.data.id;
