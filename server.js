@@ -3,8 +3,10 @@ const express = require('express');
 const { google } = require('googleapis');
 const cors = require('cors');
 const multer = require('multer');
+const fetch = require('node-fetch');
 const stream = require('stream');
 const { format } = require('date-fns');
+
 
 const app = express();
 // --- TAMBAHAN DEBUGGING (Letakkan disini) ---
@@ -40,6 +42,8 @@ const drive = google.drive({ version: 'v3', auth });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 let DRIVE_FOLDER_ID = null; // Akan di-set saat server start
+
+const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzTu2gysoQqx7PQ6bK-ccfVPSQMy54VZbILhmSYdbbaZBvDYjJTp-oIRjdSt3faHW46ZA/exec";
 
 // --- HELPER: Get or Create Upload Folder ---
 async function getOrCreateUploadFolder() {
@@ -241,54 +245,37 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
         if (!file) return res.status(400).send('No file uploaded.');
 
-        // Pastikan folder sudah di-init
-        if (!DRIVE_FOLDER_ID) {
-            DRIVE_FOLDER_ID = await getOrCreateUploadFolder();
+        // 1. Konversi Buffer File ke Base64 (agar bisa dikirim via JSON ke GAS)
+        const base64File = file.buffer.toString('base64');
+        const mimeType = file.mimetype;
+        const dataURI = `data:${mimeType};base64,${base64File}`;
+
+        // 2. Kirim ke Google Apps Script via HTTP Request
+        const response = await fetch(GAS_WEB_APP_URL, {
+            method: 'POST',
+            redirect: 'follow', // Penting! GAS sering redirect
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // GAS butuh text/plain untuk doPost JSON
+            body: JSON.stringify({
+                action: 'upload',
+                idPekerjaan: idPekerjaan,
+                jenisDokumen: jenisDokumen,
+                namaFile: file.originalname || `${idPekerjaan}_${jenisDokumen}`,
+                fileData: dataURI // Kirim data file base64
+            })
+        });
+
+        const result = await response.json();
+
+        // 3. Cek respon dari GAS
+        if (result.status === 'Sukses') {
+            // (Opsional) Jika kamu masih mau simpan log di Sheet via Service Account,
+            // biarkan kode sheet di bawah. TAPI, karena GAS sudah simpan ke Sheet juga,
+            // sebaiknya hapus saja kode update sheet di sini agar tidak duplikat.
+
+            res.json({ message: 'Berhasil upload via GAS', url: result.message });
+        } else {
+            throw new Error(result.message || 'Gagal upload ke GAS');
         }
-
-        // 1. Upload ke Google Drive
-        const bufferStream = new stream.PassThrough();
-        bufferStream.end(file.buffer);
-
-        const driveRes = await drive.files.create({
-            requestBody: {
-                name: `${idPekerjaan}_${jenisDokumen}_${Date.now()}`,
-                parents: [DRIVE_FOLDER_ID],
-            },
-            media: {
-                mimeType: file.mimetype,
-                body: bufferStream,
-            },
-            fields: 'id',
-        });
-
-        const fileId = driveRes.data.id;
-
-        // Set permission agar file bisa diakses siapa saja
-        await drive.permissions.create({
-            fileId: fileId,
-            requestBody: {
-                role: 'reader',
-                type: 'anyone',
-            },
-        });
-
-        const fileUrl = `https://drive.google.com/file/d/${fileId}/view`;
-
-        // 2. Simpan Link ke Sheet DokumenIzin
-        await sheets.spreadsheets.values.append({
-            spreadsheetId: SPREADSHEET_ID,
-            range: 'DokumenIzin!A:D',
-            valueInputOption: 'USER_ENTERED',
-            requestBody: {
-                values: [[idPekerjaan, jenisDokumen, fileUrl, getTimestamp()]]
-            }
-        });
-
-        // 3. Update Status di Sheet DataPekerjaan
-        await updateStatusPekerjaan(idPekerjaan, 12, "Dokumen Terupload");
-
-        res.json({ message: 'Berhasil upload', url: fileUrl });
 
     } catch (error) {
         console.error(error);
