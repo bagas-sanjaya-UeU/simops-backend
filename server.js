@@ -415,7 +415,7 @@ async function checkAndUpdateKelengkapan(idPekerjaan) {
             const statusRisiko = job[13] || '';
 
             // Check if both are complete
-            if (statusDokumen === 'Dokumen Tersimpan' && statusRisiko === 'Sudah Dinilai') {
+            if (statusDokumen === 'Dokumen Terupload' && statusRisiko === 'Sudah Dinilai') {
                 // Update Status_Kelengkapan (column O = index 14)
                 await updateStatusPekerjaan(idPekerjaan, 14, 'Lengkap');
             }
