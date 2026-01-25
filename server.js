@@ -442,7 +442,7 @@ app.put('/api/jobs/:id/approve', async (req, res) => {
 
 app.get('/api/rekap', async (req, res) => {
     try {
-        const { area, role } = req.query;
+        const { area } = req.query;
 
         // Ambil Data Secara Paralel agar Cepat
         const [resJobs, resRisks, resDocs] = await Promise.all([
@@ -488,7 +488,7 @@ app.get('/api/rekap', async (req, res) => {
             const statusKelengkapan = row[14] || 'Belum Lengkap';
 
             // Filter by Status_Kelengkapan = "Lengkap"
-            if (role !== 'Admin' && statusKelengkapan !== 'Lengkap') return null;
+            if (statusKelengkapan !== 'Lengkap') return null;
 
             // Filter by area if parameter is provided
             if (area && jobArea !== area) return null;
