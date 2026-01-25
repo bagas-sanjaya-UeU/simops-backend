@@ -137,17 +137,17 @@ app.post('/api/auth/login', async (req, res) => {
             // Check if account is active (index 4 = column E)
             const statusAkun = user[4] || 'Active'; // Default to Active for backward compatibility
             if (statusAkun !== 'Active') {
-                return res.status(403).json({ 
-                    status: 'Gagal', 
-                    message: statusAkun === 'Pending' 
-                        ? 'Akun Anda masih menunggu persetujuan admin' 
+                return res.status(403).json({
+                    status: 'Gagal',
+                    message: statusAkun === 'Pending'
+                        ? 'Akun Anda masih menunggu persetujuan admin'
                         : 'Akun Anda ditolak oleh admin'
                 });
             }
 
-            res.json({ 
-                status: 'Sukses', 
-                role: user[2], 
+            res.json({
+                status: 'Sukses',
+                role: user[2],
                 username: user[0],
                 area: user[3] || '',
                 statusAkun: statusAkun
@@ -186,21 +186,21 @@ app.post('/api/auth/register', async (req, res) => {
             spreadsheetId: SPREADSHEET_ID,
             range: 'DataAkun!A:H',
             valueInputOption: 'USER_ENTERED',
-            requestBody: { 
+            requestBody: {
                 values: [[
-                    regUser, 
-                    regPass, 
-                    regRole, 
-                    area || '', 
-                    statusAkun, 
-                    tanggalRegistrasi, 
-                    approvedBy, 
+                    regUser,
+                    regPass,
+                    regRole,
+                    area || '',
+                    statusAkun,
+                    tanggalRegistrasi,
+                    approvedBy,
                     tanggalApproval
-                ]] 
+                ]]
             }
         });
 
-        res.json({ 
+        res.json({
             message: 'Registrasi berhasil! Menunggu persetujuan admin.',
             status: statusAkun
         });
@@ -413,7 +413,7 @@ async function checkAndUpdateKelengkapan(idPekerjaan) {
         if (job && rowIndex !== -1) {
             const statusDokumen = job[12] || '';
             const statusRisiko = job[13] || '';
-            
+
             // Check if both are complete
             if (statusDokumen === 'Dokumen Tersimpan' && statusRisiko === 'Sudah Dinilai') {
                 // Update Status_Kelengkapan (column O = index 14)
@@ -442,7 +442,7 @@ app.put('/api/jobs/:id/approve', async (req, res) => {
 
 app.get('/api/rekap', async (req, res) => {
     try {
-        const { area } = req.query; // Get area filter from query params
+        const { area, role } = req.query;
 
         // Ambil Data Secara Paralel agar Cepat
         const [resJobs, resRisks, resDocs] = await Promise.all([
@@ -488,7 +488,7 @@ app.get('/api/rekap', async (req, res) => {
             const statusKelengkapan = row[14] || 'Belum Lengkap';
 
             // Filter by Status_Kelengkapan = "Lengkap"
-            if (statusKelengkapan !== 'Lengkap') return null;
+            if (role !== 'Admin' && statusKelengkapan !== 'Lengkap') return null;
 
             // Filter by area if parameter is provided
             if (area && jobArea !== area) return null;
@@ -597,8 +597,8 @@ app.get('/api/notifications', async (req, res) => {
                 jamSelesai: row[11],
                 statusDoc: row[12] || 'Belum Lengkap',
                 statusRisk: row[13] || 'Belum Dinilai',
-                message: row[12] !== 'Dokumen Tersimpan' 
-                    ? 'Dokumen belum lengkap' 
+                message: row[12] !== 'Dokumen Tersimpan'
+                    ? 'Dokumen belum lengkap'
                     : 'Penilaian risiko belum selesai'
             }));
 
@@ -765,7 +765,7 @@ app.put('/api/users/:username/approve', async (req, res) => {
             }
         });
 
-        res.json({ 
+        res.json({
             message: 'User approved successfully',
             username: username,
             approvedBy: adminUsername,
@@ -811,7 +811,7 @@ app.put('/api/users/:username/reject', async (req, res) => {
             requestBody: { values: [['Rejected']] }
         });
 
-        res.json({ 
+        res.json({
             message: 'User rejected successfully',
             username: username
         });
