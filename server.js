@@ -127,14 +127,31 @@ app.post('/api/auth/login', async (req, res) => {
         const { username, password } = req.body;
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataAkun!A2:C',
+            range: 'DataAkun!A2:H',
         });
 
         const rows = response.data.values || [];
         const user = rows.find(row => row[0] === username && row[1] === password);
 
         if (user) {
-            res.json({ status: 'Sukses', role: user[2], username: user[0] });
+            // Check if account is active (index 4 = column E)
+            const statusAkun = user[4] || 'Active'; // Default to Active for backward compatibility
+            if (statusAkun !== 'Active') {
+                return res.status(403).json({ 
+                    status: 'Gagal', 
+                    message: statusAkun === 'Pending' 
+                        ? 'Akun Anda masih menunggu persetujuan admin' 
+                        : 'Akun Anda ditolak oleh admin'
+                });
+            }
+
+            res.json({ 
+                status: 'Sukses', 
+                role: user[2], 
+                username: user[0],
+                area: user[3] || '',
+                statusAkun: statusAkun
+            });
         } else {
             res.status(401).json({ status: 'Gagal', message: 'Username/Password salah' });
         }
@@ -146,7 +163,7 @@ app.post('/api/auth/login', async (req, res) => {
 // Register
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { regUser, regPass, regRole } = req.body;
+        const { regUser, regPass, regRole, area } = req.body;
 
         // Cek username ada atau tidak
         const check = await sheets.spreadsheets.values.get({
@@ -159,14 +176,34 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(400).json({ message: 'Username sudah ada!' });
         }
 
+        // Set default values for new registration
+        const statusAkun = 'Pending'; // Default status for new registration
+        const tanggalRegistrasi = getTimestamp();
+        const approvedBy = ''; // Empty until approved
+        const tanggalApproval = ''; // Empty until approved
+
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataAkun!A:C',
+            range: 'DataAkun!A:H',
             valueInputOption: 'USER_ENTERED',
-            requestBody: { values: [[regUser, regPass, regRole]] }
+            requestBody: { 
+                values: [[
+                    regUser, 
+                    regPass, 
+                    regRole, 
+                    area || '', 
+                    statusAkun, 
+                    tanggalRegistrasi, 
+                    approvedBy, 
+                    tanggalApproval
+                ]] 
+            }
         });
 
-        res.json({ message: 'User Berhasil Dibuat!' });
+        res.json({ 
+            message: 'Registrasi berhasil! Menunggu persetujuan admin.',
+            status: statusAkun
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -190,12 +227,12 @@ app.post('/api/jobs', async (req, res) => {
             idUnik, timestamp, form.namaPT, form.kompartemen, form.unit,
             form.jenisPekerjaan, form.namaPekerjaan, form.area, form.pjNama,
             tglKerja, form.jamMulai, form.jamSelesai,
-            "Belum Lengkap", "Belum Dinilai"
+            "Belum Lengkap", "Belum Dinilai", "Belum Lengkap" // Added Status_Kelengkapan
         ];
 
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataPekerjaan!A:N',
+            range: 'DataPekerjaan!A:O',
             valueInputOption: 'USER_ENTERED',
             requestBody: { values: [values] }
         });
@@ -268,9 +305,9 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
         // 3. Cek respon dari GAS
         if (result.status === 'Sukses') {
-            // (Opsional) Jika kamu masih mau simpan log di Sheet via Service Account,
-            // biarkan kode sheet di bawah. TAPI, karena GAS sudah simpan ke Sheet juga,
-            // sebaiknya hapus saja kode update sheet di sini agar tidak duplikat.
+            // Check and update Status_Kelengkapan after successful upload
+            // The GAS script should already update Status_Dokumen, so we check completion here
+            await checkAndUpdateKelengkapan(idPekerjaan);
 
             res.json({ message: 'Berhasil upload via GAS', url: result.message });
         } else {
@@ -304,6 +341,9 @@ app.post('/api/risks', async (req, res) => {
 
         // Update Status di Sheet DataPekerjaan (Kolom N / Index 13)
         await updateStatusPekerjaan(idPekerjaan, 13, "Sudah Dinilai");
+
+        // Check and update Status_Kelengkapan
+        await checkAndUpdateKelengkapan(idPekerjaan);
 
         res.json({ message: 'Risiko Tersimpan' });
     } catch (error) {
@@ -348,6 +388,43 @@ async function updateStatusPekerjaan(id, colIndex, val) {
     }
 }
 
+// Helper function to check and update Status_Kelengkapan
+async function checkAndUpdateKelengkapan(idPekerjaan) {
+    try {
+        // Get the job data
+        const res = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'DataPekerjaan!A:O',
+        });
+
+        const rows = res.data.values;
+        let rowIndex = -1;
+        let job = null;
+
+        // Find the job
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][0] === idPekerjaan) {
+                rowIndex = i + 1;
+                job = rows[i];
+                break;
+            }
+        }
+
+        if (job && rowIndex !== -1) {
+            const statusDokumen = job[12] || '';
+            const statusRisiko = job[13] || '';
+            
+            // Check if both are complete
+            if (statusDokumen === 'Dokumen Tersimpan' && statusRisiko === 'Sudah Dinilai') {
+                // Update Status_Kelengkapan (column O = index 14)
+                await updateStatusPekerjaan(idPekerjaan, 14, 'Lengkap');
+            }
+        }
+    } catch (error) {
+        console.error('Error updating kelengkapan:', error);
+    }
+}
+
 // Endpoint Approve (Admin/Inspector)
 app.put('/api/jobs/:id/approve', async (req, res) => {
     try {
@@ -365,9 +442,11 @@ app.put('/api/jobs/:id/approve', async (req, res) => {
 
 app.get('/api/rekap', async (req, res) => {
     try {
+        const { area } = req.query; // Get area filter from query params
+
         // Ambil Data Secara Paralel agar Cepat
         const [resJobs, resRisks, resDocs] = await Promise.all([
-            sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: 'DataPekerjaan!A2:N' }),
+            sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: 'DataPekerjaan!A2:O' }),
             sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: 'DataRisiko!A2:F' }),
             sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: 'DokumenIzin!A2:D' })
         ]);
@@ -405,6 +484,15 @@ app.get('/api/rekap', async (req, res) => {
         const result = jobs.map(row => {
             if (!row[0]) return null;
             const id = row[0];
+            const jobArea = row[7] || '';
+            const statusKelengkapan = row[14] || 'Belum Lengkap';
+
+            // Filter by Status_Kelengkapan = "Lengkap"
+            if (statusKelengkapan !== 'Lengkap') return null;
+
+            // Filter by area if parameter is provided
+            if (area && jobArea !== area) return null;
+
             const riskInfo = jobRiskMap[id] || { maxL: 0, maxC: 0, details: [] };
 
             return {
@@ -414,13 +502,14 @@ app.get('/api/rekap', async (req, res) => {
                 unit: row[4],
                 jenis: row[5],
                 pekerjaan: row[6],
-                area: row[7],
+                area: jobArea,
                 pj: row[8],
                 tanggal: row[9],
                 jamMulai: row[10], // Pastikan format HH:mm di sheet
                 jamSelesai: row[11],
                 statusDoc: row[12] || "Belum Lengkap",
                 statusRisk: row[13] || "Belum Dinilai",
+                statusKelengkapan: statusKelengkapan,
                 riskData: riskInfo,
                 docs: jobDocMap[id] || []
             };
@@ -461,6 +550,273 @@ app.post('/api/simops', async (req, res) => {
         });
         res.json({ message: "SIMOPS Recorded" });
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+// 8. NEW ENDPOINTS - Feature 1: Notifications
+// ==========================================
+
+// Get notifications for today's incomplete jobs
+app.get('/api/notifications', async (req, res) => {
+    try {
+        const todayDate = getDateStr(); // Format: dd/MM/yyyy
+
+        // Get all jobs
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'DataPekerjaan!A2:O',
+        });
+
+        const jobs = response.data.values || [];
+
+        // Filter jobs for today that are incomplete
+        const notifications = jobs
+            .filter(row => {
+                if (!row[0]) return false;
+                const tanggalKerja = row[9] || ''; // Column J (index 9)
+                const statusDokumen = row[12] || ''; // Column M (index 12)
+                const statusRisiko = row[13] || ''; // Column N (index 13)
+
+                // Check if job is for today and incomplete
+                return (
+                    tanggalKerja === todayDate &&
+                    (statusDokumen !== 'Dokumen Tersimpan' || statusRisiko !== 'Sudah Dinilai')
+                );
+            })
+            .map(row => ({
+                id: row[0],
+                namaPT: row[2],
+                jenisPekerjaan: row[5],
+                namaPekerjaan: row[6],
+                area: row[7],
+                pj: row[8],
+                tanggal: row[9],
+                jamMulai: row[10],
+                jamSelesai: row[11],
+                statusDoc: row[12] || 'Belum Lengkap',
+                statusRisk: row[13] || 'Belum Dinilai',
+                message: row[12] !== 'Dokumen Tersimpan' 
+                    ? 'Dokumen belum lengkap' 
+                    : 'Penilaian risiko belum selesai'
+            }));
+
+        res.json({
+            date: todayDate,
+            count: notifications.length,
+            notifications: notifications
+        });
+    } catch (error) {
+        console.error('Error getting notifications:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+// 9. NEW ENDPOINTS - Feature 3: Incomplete Jobs
+// ==========================================
+
+// Get incomplete jobs by username
+app.get('/api/jobs/incomplete', async (req, res) => {
+    try {
+        const { username } = req.query;
+
+        if (!username) {
+            return res.status(400).json({ error: 'Username parameter required' });
+        }
+
+        // Get all jobs
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'DataPekerjaan!A2:O',
+        });
+
+        const jobs = response.data.values || [];
+
+        // Filter incomplete jobs by username (nama petugas in column G, index 6)
+        const incompleteJobs = jobs
+            .filter(row => {
+                if (!row[0]) return false;
+                const namaPetugas = row[6] || ''; // Column G (index 6)
+                const statusKelengkapan = row[14] || 'Belum Lengkap'; // Column O (index 14)
+
+                return namaPetugas === username && statusKelengkapan !== 'Lengkap';
+            })
+            .map(row => ({
+                id: row[0],
+                timestamp: row[1],
+                namaPT: row[2],
+                kompartemen: row[3],
+                unit: row[4],
+                jenisPekerjaan: row[5],
+                namaPekerjaan: row[6],
+                area: row[7],
+                pj: row[8],
+                tanggal: row[9],
+                jamMulai: row[10],
+                jamSelesai: row[11],
+                statusDoc: row[12] || 'Belum Lengkap',
+                statusRisk: row[13] || 'Belum Dinilai',
+                statusKelengkapan: row[14] || 'Belum Lengkap'
+            }));
+
+        res.json({
+            username: username,
+            count: incompleteJobs.length,
+            jobs: incompleteJobs
+        });
+    } catch (error) {
+        console.error('Error getting incomplete jobs:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+// 10. NEW ENDPOINTS - Feature 4: User Management
+// ==========================================
+
+// Get pending registrations (Admin only)
+app.get('/api/users/pending', async (req, res) => {
+    try {
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'DataAkun!A2:H',
+        });
+
+        const users = response.data.values || [];
+
+        // Filter users with Status_Akun = "Pending"
+        const pendingUsers = users
+            .filter(row => {
+                const statusAkun = row[4] || '';
+                return statusAkun === 'Pending';
+            })
+            .map(row => ({
+                username: row[0],
+                role: row[2],
+                area: row[3] || '',
+                statusAkun: row[4],
+                tanggalRegistrasi: row[5] || ''
+            }));
+
+        res.json({
+            count: pendingUsers.length,
+            users: pendingUsers
+        });
+    } catch (error) {
+        console.error('Error getting pending users:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Approve user registration (Admin only)
+app.put('/api/users/:username/approve', async (req, res) => {
+    try {
+        const { username } = req.params;
+        const { adminUsername } = req.body;
+
+        if (!adminUsername) {
+            return res.status(400).json({ error: 'Admin username required' });
+        }
+
+        // Get all users
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'DataAkun!A2:H',
+        });
+
+        const users = response.data.values || [];
+        let rowIndex = -1;
+
+        // Find user
+        for (let i = 0; i < users.length; i++) {
+            if (users[i][0] === username) {
+                rowIndex = i + 2; // +2 because we start from A2
+                break;
+            }
+        }
+
+        if (rowIndex === -1) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Update Status_Akun (column E), Approved_By (column G), and Tanggal_Approval (column H)
+        const tanggalApproval = getTimestamp();
+
+        await sheets.spreadsheets.values.batchUpdate({
+            spreadsheetId: SPREADSHEET_ID,
+            requestBody: {
+                valueInputOption: 'USER_ENTERED',
+                data: [
+                    {
+                        range: `DataAkun!E${rowIndex}`,
+                        values: [['Active']]
+                    },
+                    {
+                        range: `DataAkun!G${rowIndex}`,
+                        values: [[adminUsername]]
+                    },
+                    {
+                        range: `DataAkun!H${rowIndex}`,
+                        values: [[tanggalApproval]]
+                    }
+                ]
+            }
+        });
+
+        res.json({ 
+            message: 'User approved successfully',
+            username: username,
+            approvedBy: adminUsername,
+            approvedAt: tanggalApproval
+        });
+    } catch (error) {
+        console.error('Error approving user:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Reject user registration (Admin only)
+app.put('/api/users/:username/reject', async (req, res) => {
+    try {
+        const { username } = req.params;
+
+        // Get all users
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'DataAkun!A2:H',
+        });
+
+        const users = response.data.values || [];
+        let rowIndex = -1;
+
+        // Find user
+        for (let i = 0; i < users.length; i++) {
+            if (users[i][0] === username) {
+                rowIndex = i + 2; // +2 because we start from A2
+                break;
+            }
+        }
+
+        if (rowIndex === -1) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Update Status_Akun to "Rejected" (column E)
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `DataAkun!E${rowIndex}`,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: { values: [['Rejected']] }
+        });
+
+        res.json({ 
+            message: 'User rejected successfully',
+            username: username
+        });
+    } catch (error) {
+        console.error('Error rejecting user:', error);
         res.status(500).json({ error: error.message });
     }
 });
