@@ -294,7 +294,7 @@ Rejects a pending user registration (admin only).
 - **D**: Kompartemen
 - **E**: Unit
 - **F**: Jenis_Pekerjaan
-- **G**: Nama_Petugas
+- **G**: Nama_Petugas (Worker Username - maps to `namaPekerjaan` in API)
 - **H**: Area
 - **I**: Nama_PJ
 - **J**: Tanggal_Kerja
@@ -303,6 +303,8 @@ Rejects a pending user registration (admin only).
 - **M**: Status_Dokumen
 - **N**: Status_Risiko
 - **O**: Status_Kelengkapan (Belum Lengkap/Lengkap) *(NEW)*
+
+**Note:** In the API requests, the field name `namaPekerjaan` represents the worker username (Nama_Petugas in the spreadsheet).
 
 ---
 

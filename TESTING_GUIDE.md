@@ -96,6 +96,8 @@ curl -X POST http://localhost:5000/api/jobs \
   }'
 ```
 
+**Note:** The field `namaPekerjaan` represents the worker/staff username (Nama_Petugas in the spreadsheet).
+
 Expected: Returns job ID like "JOB-20260125120000"
 
 **Get incomplete jobs for teststaff:**

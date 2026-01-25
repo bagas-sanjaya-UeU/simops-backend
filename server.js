@@ -634,11 +634,11 @@ app.get('/api/jobs/incomplete', async (req, res) => {
 
         const jobs = response.data.values || [];
 
-        // Filter incomplete jobs by username (nama petugas in column G, index 6)
+        // Filter incomplete jobs by username (nama petugas/worker in column G, index 6)
         const incompleteJobs = jobs
             .filter(row => {
                 if (!row[0]) return false;
-                const namaPetugas = row[6] || ''; // Column G (index 6)
+                const namaPetugas = row[6] || ''; // Column G (index 6) - Nama_Petugas/Worker Username
                 const statusKelengkapan = row[14] || 'Belum Lengkap'; // Column O (index 14)
 
                 return namaPetugas === username && statusKelengkapan !== 'Lengkap';
