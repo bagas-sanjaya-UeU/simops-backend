@@ -127,15 +127,15 @@ app.post('/api/auth/login', async (req, res) => {
         const { username, password } = req.body;
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataAkun!A2:H',
+            range: 'DataAkun!A2:I',
         });
 
         const rows = response.data.values || [];
         const user = rows.find(row => row[0] === username && row[1] === password);
 
         if (user) {
-            // Check if account is active (index 4 = column E)
-            const statusAkun = user[4] || 'Active'; // Default to Active for backward compatibility
+            // Check if account is active (index 5 = column F)
+            const statusAkun = user[5] || 'Active'; // Default to Active for backward compatibility
             if (statusAkun !== 'Active') {
                 return res.status(403).json({
                     status: 'Gagal',
@@ -225,8 +225,9 @@ app.post('/api/jobs', async (req, res) => {
         let tglKerja = form.tanggalKerja;
         if (tglKerja) tglKerja = format(new Date(tglKerja), 'dd/MM/yyyy');
 
+        // Order: ID, Timestamp, Kompartemen, Unit, Nama_PT, Jenis_Pekerjaan, Nama_Pekerjaan, Area, PJ, Tanggal_Kerja, Jam_Mulai, Jam_Selesai, Status_Dokumen, Status_Risiko, Status_Kelengkapan
         const values = [
-            idUnik, timestamp, form.namaPT, form.kompartemen, form.unit,
+            idUnik, timestamp, form.kompartemen, form.unit, form.namaPT,
             form.jenisPekerjaan, form.namaPekerjaan, form.area, form.pjNama,
             tglKerja, form.jamMulai, form.jamSelesai,
             "Belum Lengkap", "Belum Dinilai", "Belum Lengkap" // Added Status_Kelengkapan
@@ -444,7 +445,7 @@ app.put('/api/jobs/:id/approve', async (req, res) => {
 
 app.get('/api/rekap', async (req, res) => {
     try {
-        const { area } = req.query;
+        const { area, unit } = req.query;
 
         // Ambil Data Secara Paralel agar Cepat
         const [resJobs, resRisks, resDocs] = await Promise.all([
@@ -486,7 +487,8 @@ app.get('/api/rekap', async (req, res) => {
         const result = jobs.map(row => {
             if (!row[0]) return null;
             const id = row[0];
-            const jobArea = row[7] || '';
+            const jobArea = row[7] || ''; // Column H (index 7) = Area
+            const jobUnit = row[3] || ''; // Column D (index 3) = Unit
             const statusKelengkapan = row[14] || 'Belum Lengkap';
 
             // Filter by Status_Kelengkapan = "Lengkap"
@@ -495,13 +497,17 @@ app.get('/api/rekap', async (req, res) => {
             // Filter by area if parameter is provided
             if (area && jobArea !== area) return null;
 
+            // Filter by unit if parameter is provided
+            if (unit && jobUnit !== unit) return null;
+
             const riskInfo = jobRiskMap[id] || { maxL: 0, maxC: 0, details: [] };
 
             return {
                 id: id,
-                namaPT: row[2],
-                kompartemen: row[3],
-                unit: row[4],
+                timestamp: row[1],
+                kompartemen: row[2],
+                unit: row[3],
+                namaPT: row[4],
                 jenis: row[5],
                 pekerjaan: row[6],
                 area: jobArea,
@@ -589,7 +595,9 @@ app.get('/api/notifications', async (req, res) => {
             })
             .map(row => ({
                 id: row[0],
-                namaPT: row[2],
+                kompartemen: row[2],
+                unit: row[3],
+                namaPT: row[4],
                 jenisPekerjaan: row[5],
                 namaPekerjaan: row[6],
                 area: row[7],
@@ -648,9 +656,9 @@ app.get('/api/jobs/incomplete', async (req, res) => {
             .map(row => ({
                 id: row[0],
                 timestamp: row[1],
-                namaPT: row[2],
-                kompartemen: row[3],
-                unit: row[4],
+                kompartemen: row[2],
+                unit: row[3],
+                namaPT: row[4],
                 jenisPekerjaan: row[5],
                 namaPekerjaan: row[6],
                 area: row[7],
@@ -683,7 +691,7 @@ app.get('/api/users/pending', async (req, res) => {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataAkun!A2:H',
+            range: 'DataAkun!A2:I',
         });
 
         const users = response.data.values || [];
@@ -691,15 +699,16 @@ app.get('/api/users/pending', async (req, res) => {
         // Filter users with Status_Akun = "Pending"
         const pendingUsers = users
             .filter(row => {
-                const statusAkun = row[4] || '';
+                const statusAkun = row[5] || '';
                 return statusAkun === 'Pending';
             })
             .map(row => ({
                 username: row[0],
                 role: row[2],
                 area: row[3] || '',
-                statusAkun: row[4],
-                tanggalRegistrasi: row[5] || ''
+                unit: row[4] || '',
+                statusAkun: row[5],
+                tanggalRegistrasi: row[6] || ''
             }));
 
         res.json({
@@ -725,7 +734,7 @@ app.put('/api/users/:username/approve', async (req, res) => {
         // Get all users
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataAkun!A2:H',
+            range: 'DataAkun!A2:I',
         });
 
         const users = response.data.values || [];
@@ -743,7 +752,7 @@ app.put('/api/users/:username/approve', async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        // Update Status_Akun (column E), Approved_By (column G), and Tanggal_Approval (column H)
+        // Update Status_Akun (column F), Approved_By (column H), and Tanggal_Approval (column I)
         const tanggalApproval = getTimestamp();
 
         await sheets.spreadsheets.values.batchUpdate({
@@ -752,15 +761,15 @@ app.put('/api/users/:username/approve', async (req, res) => {
                 valueInputOption: 'USER_ENTERED',
                 data: [
                     {
-                        range: `DataAkun!E${rowIndex}`,
+                        range: `DataAkun!F${rowIndex}`,
                         values: [['Active']]
                     },
                     {
-                        range: `DataAkun!G${rowIndex}`,
+                        range: `DataAkun!H${rowIndex}`,
                         values: [[adminUsername]]
                     },
                     {
-                        range: `DataAkun!H${rowIndex}`,
+                        range: `DataAkun!I${rowIndex}`,
                         values: [[tanggalApproval]]
                     }
                 ]
@@ -787,7 +796,7 @@ app.put('/api/users/:username/reject', async (req, res) => {
         // Get all users
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataAkun!A2:H',
+            range: 'DataAkun!A2:I',
         });
 
         const users = response.data.values || [];
@@ -805,10 +814,10 @@ app.put('/api/users/:username/reject', async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        // Update Status_Akun to "Rejected" (column E)
+        // Update Status_Akun to "Rejected" (column F)
         await sheets.spreadsheets.values.update({
             spreadsheetId: SPREADSHEET_ID,
-            range: `DataAkun!E${rowIndex}`,
+            range: `DataAkun!F${rowIndex}`,
             valueInputOption: 'USER_ENTERED',
             requestBody: { values: [['Rejected']] }
         });
@@ -819,6 +828,348 @@ app.put('/api/users/:username/reject', async (req, res) => {
         });
     } catch (error) {
         console.error('Error rejecting user:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+// 11. NEW ENDPOINTS - Feature 2: SIMOPS Risk Control
+// ==========================================
+
+// Get conflicts - detect jobs with overlapping time and same area
+app.get('/api/simops/conflicts', async (req, res) => {
+    try {
+        const { date, area } = req.query;
+
+        if (!date || !area) {
+            return res.status(400).json({ error: 'Date and area parameters required' });
+        }
+
+        // Get all jobs
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'DataPekerjaan!A2:O',
+        });
+
+        const jobs = response.data.values || [];
+
+        // Filter jobs by date and area
+        const filteredJobs = jobs
+            .filter(row => {
+                if (!row[0]) return false;
+                const tanggalKerja = row[9] || ''; // Column J (index 9)
+                const jobArea = row[7] || ''; // Column H (index 7)
+                return tanggalKerja === date && jobArea === area;
+            })
+            .map(row => ({
+                id: row[0],
+                namaPT: row[4] || '', // Column E (index 4)
+                area: row[7] || '', // Column H (index 7)
+                jamMulai: row[10] || '', // Column K (index 10)
+                jamSelesai: row[11] || '' // Column L (index 11)
+            }));
+
+        // Group jobs by overlapping time slots
+        const conflicts = [];
+        const processed = new Set();
+
+        for (let i = 0; i < filteredJobs.length; i++) {
+            if (processed.has(i)) continue;
+
+            const job1 = filteredJobs[i];
+            const conflictGroup = [job1];
+            processed.add(i);
+
+            // Parse time for job1
+            const [h1Start, m1Start] = (job1.jamMulai || '00:00').split(':').map(Number);
+            const [h1End, m1End] = (job1.jamSelesai || '00:00').split(':').map(Number);
+            const start1 = h1Start * 60 + m1Start;
+            const end1 = h1End * 60 + m1End;
+
+            // Find overlapping jobs
+            for (let j = i + 1; j < filteredJobs.length; j++) {
+                if (processed.has(j)) continue;
+
+                const job2 = filteredJobs[j];
+                const [h2Start, m2Start] = (job2.jamMulai || '00:00').split(':').map(Number);
+                const [h2End, m2End] = (job2.jamSelesai || '00:00').split(':').map(Number);
+                const start2 = h2Start * 60 + m2Start;
+                const end2 = h2End * 60 + m2End;
+
+                // Check for overlap
+                if (!(end1 <= start2 || end2 <= start1)) {
+                    conflictGroup.push(job2);
+                    processed.add(j);
+                }
+            }
+
+            // Only add to conflicts if there are 2 or more jobs in the group
+            if (conflictGroup.length >= 2) {
+                // Calculate the actual overlap period
+                let minStart = start1;
+                let maxEnd = end1;
+                
+                for (const job of conflictGroup) {
+                    const [hStart, mStart] = (job.jamMulai || '00:00').split(':').map(Number);
+                    const [hEnd, mEnd] = (job.jamSelesai || '00:00').split(':').map(Number);
+                    const start = hStart * 60 + mStart;
+                    const end = hEnd * 60 + mEnd;
+                    
+                    minStart = Math.min(minStart, start);
+                    maxEnd = Math.max(maxEnd, end);
+                }
+                
+                const formatTime = (minutes) => {
+                    const h = Math.floor(minutes / 60);
+                    const m = minutes % 60;
+                    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                };
+                
+                const timeSlot = `${formatTime(minStart)}-${formatTime(maxEnd)}`;
+                conflicts.push({
+                    timeSlot: timeSlot,
+                    jobs: conflictGroup
+                });
+            }
+        }
+
+        res.json({
+            date: date,
+            area: area,
+            conflicts: conflicts
+        });
+    } catch (error) {
+        console.error('Error getting conflicts:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Save time change mitigation
+app.post('/api/simops/mitigasi-ganti-jam', async (req, res) => {
+    try {
+        const { simopsId, area, changes } = req.body;
+
+        if (!simopsId || !area || !changes || !Array.isArray(changes)) {
+            return res.status(400).json({ error: 'simopsId, area, and changes array required' });
+        }
+
+        // Find the SIMOPS record
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'RekapSIMOPS!A2:H',
+        });
+
+        const rows = response.data.values || [];
+        let rowIndex = -1;
+
+        // Find the row with matching simopsId
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][0] === simopsId) {
+                rowIndex = i + 2; // +2 because we start from A2
+                break;
+            }
+        }
+
+        if (rowIndex === -1) {
+            return res.status(404).json({ error: 'SIMOPS record not found' });
+        }
+
+        // Update RekapSIMOPS with time changes
+        const waktuInputData = JSON.stringify(changes);
+
+        await sheets.spreadsheets.values.batchUpdate({
+            spreadsheetId: SPREADSHEET_ID,
+            requestBody: {
+                valueInputOption: 'USER_ENTERED',
+                data: [
+                    {
+                        range: `RekapSIMOPS!E${rowIndex}`, // Column E = Keputusan_Pengendalian
+                        values: [['Ganti Jam']]
+                    },
+                    {
+                        range: `RekapSIMOPS!H${rowIndex}`, // Column H = Waktu_Input
+                        values: [[waktuInputData]]
+                    }
+                ]
+            }
+        });
+
+        // Optionally update DataPekerjaan with new times
+        for (const change of changes) {
+            const { jobId, jamMulai, jamSelesai } = change;
+            
+            // Find job row
+            const jobsResponse = await sheets.spreadsheets.values.get({
+                spreadsheetId: SPREADSHEET_ID,
+                range: 'DataPekerjaan!A2:O',
+            });
+
+            const jobRows = jobsResponse.data.values || [];
+            let jobRowIndex = -1;
+
+            for (let i = 0; i < jobRows.length; i++) {
+                if (jobRows[i][0] === jobId) {
+                    jobRowIndex = i + 2;
+                    break;
+                }
+            }
+
+            if (jobRowIndex !== -1) {
+                await sheets.spreadsheets.values.batchUpdate({
+                    spreadsheetId: SPREADSHEET_ID,
+                    requestBody: {
+                        valueInputOption: 'USER_ENTERED',
+                        data: [
+                            {
+                                range: `DataPekerjaan!K${jobRowIndex}`, // Column K = Jam_Mulai
+                                values: [[jamMulai]]
+                            },
+                            {
+                                range: `DataPekerjaan!L${jobRowIndex}`, // Column L = Jam_Selesai
+                                values: [[jamSelesai]]
+                            }
+                        ]
+                    }
+                });
+            }
+        }
+
+        res.json({
+            message: 'Mitigasi ganti jam berhasil disimpan',
+            simopsId: simopsId,
+            changes: changes
+        });
+    } catch (error) {
+        console.error('Error saving time change mitigation:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Save other mitigation
+app.post('/api/simops/mitigasi-lainnya', async (req, res) => {
+    try {
+        const { simopsId, area, namaSO, namaSI, leader, jumlahPekerja } = req.body;
+
+        if (!simopsId || !area) {
+            return res.status(400).json({ error: 'simopsId and area required' });
+        }
+
+        // Find the SIMOPS record
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'RekapSIMOPS!A2:H',
+        });
+
+        const rows = response.data.values || [];
+        let rowIndex = -1;
+
+        // Find the row with matching simopsId
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][0] === simopsId) {
+                rowIndex = i + 2; // +2 because we start from A2
+                break;
+            }
+        }
+
+        if (rowIndex === -1) {
+            return res.status(404).json({ error: 'SIMOPS record not found' });
+        }
+
+        // Prepare mitigation data
+        const mitigationData = {
+            namaSO: namaSO || [],
+            namaSI: namaSI || [],
+            leader: leader || '',
+            jumlahPekerja: jumlahPekerja || 0
+        };
+
+        const detailMitigasiJSON = JSON.stringify(mitigationData);
+
+        // Update RekapSIMOPS
+        await sheets.spreadsheets.values.batchUpdate({
+            spreadsheetId: SPREADSHEET_ID,
+            requestBody: {
+                valueInputOption: 'USER_ENTERED',
+                data: [
+                    {
+                        range: `RekapSIMOPS!E${rowIndex}`, // Column E = Keputusan_Pengendalian
+                        values: [['Mitigasi Lainnya']]
+                    },
+                    {
+                        range: `RekapSIMOPS!G${rowIndex}`, // Column G = Detail_Mitigasi_JSON
+                        values: [[detailMitigasiJSON]]
+                    }
+                ]
+            }
+        });
+
+        res.json({
+            message: 'Mitigasi lainnya berhasil disimpan',
+            simopsId: simopsId,
+            data: mitigationData
+        });
+    } catch (error) {
+        console.error('Error saving other mitigation:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get SIMOPS recap data
+app.get('/api/simops/rekap', async (req, res) => {
+    try {
+        const { simopsId } = req.query;
+
+        // Get all SIMOPS records
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'RekapSIMOPS!A2:H',
+        });
+
+        const rows = response.data.values || [];
+
+        // Map to structured data
+        let rekapData = rows
+            .filter(row => row[0]) // Filter out empty rows
+            .map(row => {
+                // Parse JSON fields safely
+                let dataRisiko = {};
+                let detailMitigasi = {};
+
+                try {
+                    if (row[5]) dataRisiko = JSON.parse(row[5]);
+                } catch (e) {
+                    console.error('Error parsing Data_Risiko_JSON:', e);
+                }
+
+                try {
+                    if (row[6]) detailMitigasi = JSON.parse(row[6]);
+                } catch (e) {
+                    console.error('Error parsing Detail_Mitigasi_JSON:', e);
+                }
+
+                return {
+                    idSimops: row[0],
+                    tanggal: row[1] || '',
+                    area: row[2] || '',
+                    konflikAntara: row[3] || '',
+                    keputusanPengendalian: row[4] || '',
+                    dataRisiko: dataRisiko,
+                    detailMitigasi: detailMitigasi,
+                    waktuInput: row[7] || ''
+                };
+            });
+
+        // Filter by simopsId if provided
+        if (simopsId) {
+            rekapData = rekapData.filter(item => item.idSimops === simopsId);
+        }
+
+        res.json({
+            count: rekapData.length,
+            data: rekapData
+        });
+    } catch (error) {
+        console.error('Error getting SIMOPS recap:', error);
         res.status(500).json({ error: error.message });
     }
 });
