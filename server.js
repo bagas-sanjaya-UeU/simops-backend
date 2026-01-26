@@ -905,7 +905,27 @@ app.get('/api/simops/conflicts', async (req, res) => {
 
             // Only add to conflicts if there are 2 or more jobs in the group
             if (conflictGroup.length >= 2) {
-                const timeSlot = `${job1.jamMulai}-${job1.jamSelesai}`;
+                // Calculate the actual overlap period
+                let minStart = start1;
+                let maxEnd = end1;
+                
+                for (const job of conflictGroup) {
+                    const [hStart, mStart] = (job.jamMulai || '00:00').split(':').map(Number);
+                    const [hEnd, mEnd] = (job.jamSelesai || '00:00').split(':').map(Number);
+                    const start = hStart * 60 + mStart;
+                    const end = hEnd * 60 + mEnd;
+                    
+                    minStart = Math.min(minStart, start);
+                    maxEnd = Math.max(maxEnd, end);
+                }
+                
+                const formatTime = (minutes) => {
+                    const h = Math.floor(minutes / 60);
+                    const m = minutes % 60;
+                    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                };
+                
+                const timeSlot = `${formatTime(minStart)}-${formatTime(maxEnd)}`;
                 conflicts.push({
                     timeSlot: timeSlot,
                     jobs: conflictGroup
