@@ -225,8 +225,9 @@ app.post('/api/jobs', async (req, res) => {
         let tglKerja = form.tanggalKerja;
         if (tglKerja) tglKerja = format(new Date(tglKerja), 'dd/MM/yyyy');
 
+        // Order: ID, Timestamp, Kompartemen, Unit, Nama_PT, Jenis_Pekerjaan, Nama_Pekerjaan, Area, PJ, Tanggal_Kerja, Jam_Mulai, Jam_Selesai, Status_Dokumen, Status_Risiko, Status_Kelengkapan
         const values = [
-            idUnik, timestamp, form.namaPT, form.kompartemen, form.unit,
+            idUnik, timestamp, form.kompartemen, form.unit, form.namaPT,
             form.jenisPekerjaan, form.namaPekerjaan, form.area, form.pjNama,
             tglKerja, form.jamMulai, form.jamSelesai,
             "Belum Lengkap", "Belum Dinilai", "Belum Lengkap" // Added Status_Kelengkapan
@@ -486,7 +487,7 @@ app.get('/api/rekap', async (req, res) => {
         const result = jobs.map(row => {
             if (!row[0]) return null;
             const id = row[0];
-            const jobArea = row[7] || '';
+            const jobArea = row[7] || ''; // Column H (index 7) = Area
             const jobUnit = row[3] || ''; // Column D (index 3) = Unit
             const statusKelengkapan = row[14] || 'Belum Lengkap';
 
@@ -503,9 +504,10 @@ app.get('/api/rekap', async (req, res) => {
 
             return {
                 id: id,
-                namaPT: row[2],
-                kompartemen: row[3],
-                unit: row[4],
+                timestamp: row[1],
+                kompartemen: row[2],
+                unit: row[3],
+                namaPT: row[4],
                 jenis: row[5],
                 pekerjaan: row[6],
                 area: jobArea,
@@ -593,7 +595,9 @@ app.get('/api/notifications', async (req, res) => {
             })
             .map(row => ({
                 id: row[0],
-                namaPT: row[2],
+                kompartemen: row[2],
+                unit: row[3],
+                namaPT: row[4],
                 jenisPekerjaan: row[5],
                 namaPekerjaan: row[6],
                 area: row[7],
@@ -652,9 +656,9 @@ app.get('/api/jobs/incomplete', async (req, res) => {
             .map(row => ({
                 id: row[0],
                 timestamp: row[1],
-                namaPT: row[2],
-                kompartemen: row[3],
-                unit: row[4],
+                kompartemen: row[2],
+                unit: row[3],
+                namaPT: row[4],
                 jenisPekerjaan: row[5],
                 namaPekerjaan: row[6],
                 area: row[7],
@@ -859,7 +863,7 @@ app.get('/api/simops/conflicts', async (req, res) => {
             })
             .map(row => ({
                 id: row[0],
-                namaPT: row[2] || '', // Column C (index 2)
+                namaPT: row[4] || '', // Column E (index 4)
                 area: row[7] || '', // Column H (index 7)
                 jamMulai: row[10] || '', // Column K (index 10)
                 jamSelesai: row[11] || '' // Column L (index 11)

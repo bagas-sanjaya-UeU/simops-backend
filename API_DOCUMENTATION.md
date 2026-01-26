@@ -476,12 +476,12 @@ Rejects a pending user registration (admin only).
 - **H**: Approved_By
 - **I**: Tanggal_Approval
 
-### DataPekerjaan Sheet (Updated to A:O)
+### DataPekerjaan Sheet (A:O)
 - **A**: ID_Pekerjaan
 - **B**: Timestamp
-- **C**: Nama_PT
-- **D**: Kompartemen
-- **E**: Unit
+- **C**: Kompartemen
+- **D**: Unit
+- **E**: Nama_PT
 - **F**: Jenis_Pekerjaan
 - **G**: Nama_Petugas (Worker Username - maps to `namaPekerjaan` in API)
 - **H**: Area
