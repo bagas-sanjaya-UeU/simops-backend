@@ -150,6 +150,7 @@ app.post('/api/auth/login', async (req, res) => {
                 role: user[2],
                 username: user[0],
                 area: user[3] || '',
+                unit: user[4] || '',
                 statusAkun: statusAkun
             });
         } else {
@@ -163,7 +164,7 @@ app.post('/api/auth/login', async (req, res) => {
 // Register
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { regUser, regPass, regRole, area } = req.body;
+        const { regUser, regPass, regRole, area, unit } = req.body;
 
         // Cek username ada atau tidak
         const check = await sheets.spreadsheets.values.get({
@@ -184,7 +185,7 @@ app.post('/api/auth/register', async (req, res) => {
 
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataAkun!A:H',
+            range: 'DataAkun!A:I',
             valueInputOption: 'USER_ENTERED',
             requestBody: {
                 values: [[
@@ -192,6 +193,7 @@ app.post('/api/auth/register', async (req, res) => {
                     regPass,
                     regRole,
                     area || '',
+                    unit || '',
                     statusAkun,
                     tanggalRegistrasi,
                     approvedBy,
