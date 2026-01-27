@@ -532,7 +532,116 @@ app.get('/api/rekap', async (req, res) => {
 });
 
 // ==========================================
-// 7. SIMPAN SIMOPS (UPDATED - Fix Waktu_Input & Data_Risiko_JSON)
+// 7a. CREATE INITIAL SIMOPS (Saat konflik terdeteksi)
+// ==========================================
+app.post('/api/simops/init', async (req, res) => {
+    try {
+        const { idSimops, area, tanggal, konflikJobs, gabunganRisk } = req.body;
+
+        if (!idSimops || !area || !tanggal) {
+            return res.status(400).json({ error: 'idSimops, area, and tanggal are required' });
+        }
+
+        // Check if this SIMOPS already exists (by area and tanggal)
+        const existing = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'RekapSIMOPS!A2:C',
+        });
+
+        const rows = existing.data.values || [];
+        const existingRecord = rows.find(r => r[2] === area && r[1] === tanggal);
+
+        if (existingRecord) {
+            // Return existing ID if already exists
+            return res.json({
+                message: "SIMOPS already exists",
+                id: existingRecord[0],
+                isNew: false
+            });
+        }
+
+        const waktuInput = new Date().toISOString();
+        const dataRisikoJSON = JSON.stringify(gabunganRisk || {});
+
+        // Insert new record with Keputusan = 'Belum Ditentukan'
+        await sheets.spreadsheets.values.append({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'RekapSIMOPS!A:I',
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+                values: [[
+                    idSimops,                           // A: ID_Simops
+                    tanggal,                            // B: Tanggal
+                    area,                               // C: Area
+                    konflikJobs || '',                  // D: Konflik_Antara
+                    'Belum Ditentukan',                 // E: Keputusan_Pengendalian
+                    dataRisikoJSON,                     // F: Data_Risiko_JSON
+                    '',                                 // G: Detail_Mitigasi_JSON (kosong dulu)
+                    waktuInput,                         // H: Waktu_Input
+                    ''                                  // I: RiskResidual
+                ]]
+            }
+        });
+
+        res.json({ message: "SIMOPS Initialized", id: idSimops, isNew: true });
+    } catch (error) {
+        console.error("Error init simops:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+// 7b. UPDATE SIMOPS dengan Mitigasi (untuk Ganti Jam / Mitigasi Lainnya)
+// ==========================================
+app.put('/api/simops/:id/mitigasi', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { keputusan, detailMitigasi, gabunganRisk } = req.body;
+
+        // Find the SIMOPS record
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'RekapSIMOPS!A2:I',
+        });
+
+        const rows = response.data.values || [];
+        let rowIndex = -1;
+
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][0] === id) {
+                rowIndex = i + 2;
+                break;
+            }
+        }
+
+        if (rowIndex === -1) {
+            return res.status(404).json({ error: 'SIMOPS record not found' });
+        }
+
+        const dataRisikoJSON = JSON.stringify(gabunganRisk || {});
+        const detailMitigasiJSON = JSON.stringify(detailMitigasi || {});
+
+        await sheets.spreadsheets.values.batchUpdate({
+            spreadsheetId: SPREADSHEET_ID,
+            requestBody: {
+                valueInputOption: 'USER_ENTERED',
+                data: [
+                    { range: `RekapSIMOPS!E${rowIndex}`, values: [[keputusan]] },
+                    { range: `RekapSIMOPS!F${rowIndex}`, values: [[dataRisikoJSON]] },
+                    { range: `RekapSIMOPS!G${rowIndex}`, values: [[detailMitigasiJSON]] }
+                ]
+            }
+        });
+
+        res.json({ message: 'Mitigasi berhasil disimpan', id: id });
+    } catch (error) {
+        console.error('Error updating mitigasi:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+// 7c. SIMPAN SIMOPS (Legacy - untuk backward compatibility)
 // ==========================================
 app.post('/api/simops', async (req, res) => {
     try {
@@ -804,11 +913,8 @@ app.get('/api/users/pending', async (req, res) => {
 app.put('/api/users/:username/approve', async (req, res) => {
     try {
         const { username } = req.params;
-        const { adminUsername } = req.body;
-
-        if (!adminUsername) {
-            return res.status(400).json({ error: 'Admin username required' });
-        }
+        // Fix: Make adminUsername optional, use 'Admin' as default
+        const adminUsername = req.body?.adminUsername || 'Admin';
 
         // Get all users
         const response = await sheets.spreadsheets.values.get({
