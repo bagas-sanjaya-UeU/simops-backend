@@ -118,6 +118,19 @@ The server will start on `http://localhost:5000`
 | C | Link_File | URL |
 | D | Waktu_Upload | Timestamp |
 
+### RekapSIMOPS Sheet (A:H)
+| Column | Field | Type |
+|--------|-------|------|
+| A | ID_Simops | String |
+| B | Tanggal | String |
+| C | Area | String |
+| D | Konflik_Antara | String |
+| E | Keputusan_Pengendalian | String |
+| F | Data_Risiko_JSON | String |
+| G | Detail_Mitigasi_JSON | String |
+| H | Waktu_Input | String |
+
+
 ## 🔌 API Endpoints
 
 ### Authentication
