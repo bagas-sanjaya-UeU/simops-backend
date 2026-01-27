@@ -537,27 +537,87 @@ app.get('/api/rekap', async (req, res) => {
 app.post('/api/simops', async (req, res) => {
     try {
         const data = req.body;
-        const idSimops = "SIM-" + format(new Date(), "ddMMHHmm");
+        // Guna ID dari Frontend jika ada, jika tidak generate di backend
+        const idSimops = data.idSimops || ("SIM-" + format(new Date(), "ddMMHHmm"));
+        const timestamp = getDateStr();
+
+        // Kita asumsikan Kolom I (Index 8) akan dipakai untuk Risiko Residual nanti
+        // Urutan Kolom: ID, Tanggal, Area, Konflik, Keputusan, APD(JSON), GabunganRisk(JSON), WaktuInput, RiskResidual(JSON)
 
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'RekapSIMOPS!A:H',
+            range: 'RekapSIMOPS!A:I', // Update range sampai I
             valueInputOption: 'USER_ENTERED',
             requestBody: {
                 values: [[
                     idSimops,
-                    getDateStr(),
+                    timestamp,
                     data.area,
                     data.konflikJobs,
-                    "Mitigasi Tambahan",
-                    JSON.stringify(data.apdTambahan),
+                    "Mitigasi: " + (data.gabunganRisk.type || "Umum"),
+                    JSON.stringify(data.apdTambahan || []),
                     JSON.stringify(data.gabunganRisk),
-                    new Date().toISOString()
+                    new Date().toISOString(),
+                    "" // Kolom I kosong dulu (tempat Risiko Residual)
                 ]]
             }
         });
-        res.json({ message: "SIMOPS Recorded" });
+        res.json({ message: "SIMOPS Recorded", id: idSimops });
     } catch (error) {
+        console.error("Error save simops:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+app.post('/api/simops/residual', async (req, res) => {
+    try {
+        const { simopsId, l, c, rr } = req.body;
+
+        if (!simopsId) return res.status(400).json({ error: 'ID Simops required' });
+
+        // Cari Baris berdasarkan ID
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'RekapSIMOPS!A2:A', // Ambil kolom ID saja
+        });
+
+        const rows = response.data.values || [];
+        let rowIndex = -1;
+
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][0] === simopsId) {
+                rowIndex = i + 2; // +2 karena mulai dari A2
+                break;
+            }
+        }
+
+        if (rowIndex === -1) {
+            return res.status(404).json({ error: 'Data SIMOPS tidak ditemukan' });
+        }
+
+        // Format Data Residual JSON
+        const residualData = JSON.stringify({
+            maxL: parseInt(l),
+            maxC: parseInt(c),
+            rr: parseInt(rr),
+            updatedAt: new Date().toISOString()
+        });
+
+        // Update Kolom I (Index 8) pada baris yang ditemukan
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `RekapSIMOPS!I${rowIndex}`, // Kolom I untuk Residual
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+                values: [[residualData]]
+            }
+        });
+
+        res.json({ message: "Risiko Residual Disimpan" });
+
+    } catch (error) {
+        console.error("Error save residual:", error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -908,23 +968,23 @@ app.get('/api/simops/conflicts', async (req, res) => {
                 // Calculate the actual overlap period
                 let minStart = start1;
                 let maxEnd = end1;
-                
+
                 for (const job of conflictGroup) {
                     const [hStart, mStart] = (job.jamMulai || '00:00').split(':').map(Number);
                     const [hEnd, mEnd] = (job.jamSelesai || '00:00').split(':').map(Number);
                     const start = hStart * 60 + mStart;
                     const end = hEnd * 60 + mEnd;
-                    
+
                     minStart = Math.min(minStart, start);
                     maxEnd = Math.max(maxEnd, end);
                 }
-                
+
                 const formatTime = (minutes) => {
                     const h = Math.floor(minutes / 60);
                     const m = minutes % 60;
                     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
                 };
-                
+
                 const timeSlot = `${formatTime(minStart)}-${formatTime(maxEnd)}`;
                 conflicts.push({
                     timeSlot: timeSlot,
@@ -997,7 +1057,7 @@ app.post('/api/simops/mitigasi-ganti-jam', async (req, res) => {
         // Optionally update DataPekerjaan with new times
         for (const change of changes) {
             const { jobId, jamMulai, jamSelesai } = change;
-            
+
             // Find job row
             const jobsResponse = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
@@ -1118,58 +1178,41 @@ app.post('/api/simops/mitigasi-lainnya', async (req, res) => {
 app.get('/api/simops/rekap', async (req, res) => {
     try {
         const { simopsId } = req.query;
-
-        // Get all SIMOPS records
+        // Ambil range lebih luas (A sampai I)
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'RekapSIMOPS!A2:H',
+            range: 'RekapSIMOPS!A2:I',
         });
 
         const rows = response.data.values || [];
 
-        // Map to structured data
         let rekapData = rows
-            .filter(row => row[0]) // Filter out empty rows
+            .filter(row => row[0])
             .map(row => {
-                // Parse JSON fields safely
-                let dataRisiko = {};
-                let detailMitigasi = {};
+                let dataRisiko = {};     // Dari Kolom G (Gabungan Risk)
+                let dataResidual = null; // Dari Kolom I (Residual Risk)
 
-                try {
-                    if (row[5]) dataRisiko = JSON.parse(row[5]);
-                } catch (e) {
-                    console.error('Error parsing Data_Risiko_JSON:', e);
-                }
-
-                try {
-                    if (row[6]) detailMitigasi = JSON.parse(row[6]);
-                } catch (e) {
-                    console.error('Error parsing Detail_Mitigasi_JSON:', e);
-                }
+                try { if (row[6]) dataRisiko = JSON.parse(row[6]); } catch (e) { }
+                try { if (row[8]) dataResidual = JSON.parse(row[8]); } catch (e) { }
 
                 return {
                     idSimops: row[0],
-                    tanggal: row[1] || '',
-                    area: row[2] || '',
-                    konflikAntara: row[3] || '',
-                    keputusanPengendalian: row[4] || '',
+                    tanggal: row[1],
+                    area: row[2],
+                    konflikAntara: row[3],
+                    keputusan: row[4],
                     dataRisiko: dataRisiko,
-                    detailMitigasi: detailMitigasi,
-                    waktuInput: row[7] || ''
+                    waktuInput: row[7],
+                    dataResidual: dataResidual // Include data residual
                 };
             });
 
-        // Filter by simopsId if provided
         if (simopsId) {
             rekapData = rekapData.filter(item => item.idSimops === simopsId);
         }
 
-        res.json({
-            count: rekapData.length,
-            data: rekapData
-        });
+        res.json({ count: rekapData.length, data: rekapData });
     } catch (error) {
-        console.error('Error getting SIMOPS recap:', error);
         res.status(500).json({ error: error.message });
     }
 });
