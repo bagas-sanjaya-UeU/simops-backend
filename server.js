@@ -532,7 +532,7 @@ app.get('/api/rekap', async (req, res) => {
 });
 
 // ==========================================
-// 7. SIMPAN SIMOPS (Optional)
+// 7. SIMPAN SIMOPS (UPDATED - Fix Waktu_Input & Data_Risiko_JSON)
 // ==========================================
 app.post('/api/simops', async (req, res) => {
     try {
@@ -541,24 +541,43 @@ app.post('/api/simops', async (req, res) => {
         const idSimops = data.idSimops || ("SIM-" + format(new Date(), "ddMMHHmm"));
         const timestamp = getDateStr();
 
-        // Kita asumsikan Kolom I (Index 8) akan dipakai untuk Risiko Residual nanti
-        // Urutan Kolom: ID, Tanggal, Area, Konflik, Keputusan, APD(JSON), GabunganRisk(JSON), WaktuInput, RiskResidual(JSON)
+        // FIX #1: Waktu_Input sekarang menggunakan timestamp yang benar (ISO format)
+        const waktuInput = new Date().toISOString();
+
+        // FIX #2: Data_Risiko_JSON sekarang menyimpan maxL, maxC dari gabungan risiko
+        // Data ini dikirim dari frontend dengan struktur { maxL, maxC, ... }
+        const dataRisikoJSON = JSON.stringify(data.gabunganRisk || {});
+
+        // Detail_Mitigasi_JSON untuk menyimpan detail mitigasi (APD, changes, dll)
+        const detailMitigasiJSON = JSON.stringify({
+            type: data.gabunganRisk?.type || '',
+            apdTambahan: data.apdTambahan || [],
+            changes: data.gabunganRisk?.changes || [],
+            namaSO: data.gabunganRisk?.namaSO || [],
+            namaSI: data.gabunganRisk?.namaSI || [],
+            leader: data.gabunganRisk?.leader || '',
+            jumlahPekerja: data.gabunganRisk?.jumlahPekerja || 0
+        });
+
+        // Urutan Kolom: 
+        // A=ID_Simops, B=Tanggal, C=Area, D=Konflik_Antara, E=Keputusan_Pengendalian, 
+        // F=Data_Risiko_JSON, G=Detail_Mitigasi_JSON, H=Waktu_Input, I=RiskResidual
 
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'RekapSIMOPS!A:I', // Update range sampai I
+            range: 'RekapSIMOPS!A:I',
             valueInputOption: 'USER_ENTERED',
             requestBody: {
                 values: [[
-                    idSimops,
-                    timestamp,
-                    data.area,
-                    data.konflikJobs,
-                    "Mitigasi: " + (data.gabunganRisk.type || "Umum"),
-                    JSON.stringify(data.apdTambahan || []),
-                    JSON.stringify(data.gabunganRisk),
-                    new Date().toISOString(),
-                    "" // Kolom I kosong dulu (tempat Risiko Residual)
+                    idSimops,                                           // A: ID_Simops
+                    timestamp,                                          // B: Tanggal
+                    data.area,                                          // C: Area
+                    data.konflikJobs,                                   // D: Konflik_Antara
+                    data.gabunganRisk?.type || "Belum Ditentukan",      // E: Keputusan_Pengendalian
+                    dataRisikoJSON,                                     // F: Data_Risiko_JSON (maxL, maxC)
+                    detailMitigasiJSON,                                 // G: Detail_Mitigasi_JSON
+                    waktuInput,                                         // H: Waktu_Input (timestamp)
+                    ""                                                  // I: RiskResidual (kosong dulu)
                 ]]
             }
         });
@@ -893,7 +912,7 @@ app.put('/api/users/:username/reject', async (req, res) => {
 });
 
 // ==========================================
-// 11. NEW ENDPOINTS - Feature 2: SIMOPS Risk Control
+// 11. NEW ENDPOINTS - Feature 2: SIMOPS Risk Control (UPDATED)
 // ==========================================
 
 // Get conflicts - detect jobs with overlapping time and same area
@@ -1004,7 +1023,7 @@ app.get('/api/simops/conflicts', async (req, res) => {
     }
 });
 
-// Save time change mitigation
+// Save time change mitigation (UPDATED - Fix Waktu_Input)
 app.post('/api/simops/mitigasi-ganti-jam', async (req, res) => {
     try {
         const { simopsId, area, changes } = req.body;
@@ -1016,7 +1035,7 @@ app.post('/api/simops/mitigasi-ganti-jam', async (req, res) => {
         // Find the SIMOPS record
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'RekapSIMOPS!A2:H',
+            range: 'RekapSIMOPS!A2:I',
         });
 
         const rows = response.data.values || [];
@@ -1034,8 +1053,14 @@ app.post('/api/simops/mitigasi-ganti-jam', async (req, res) => {
             return res.status(404).json({ error: 'SIMOPS record not found' });
         }
 
-        // Update RekapSIMOPS with time changes
-        const waktuInputData = JSON.stringify(changes);
+        // FIX: Update Detail_Mitigasi_JSON dengan data changes (bukan Waktu_Input)
+        // Get existing Detail_Mitigasi_JSON and merge with changes
+        const existingData = rows[rowIndex - 2][6] ? JSON.parse(rows[rowIndex - 2][6]) : {};
+        const updatedMitigasiData = {
+            ...existingData,
+            type: 'Ganti Jam',
+            changes: changes
+        };
 
         await sheets.spreadsheets.values.batchUpdate({
             spreadsheetId: SPREADSHEET_ID,
@@ -1047,9 +1072,10 @@ app.post('/api/simops/mitigasi-ganti-jam', async (req, res) => {
                         values: [['Ganti Jam']]
                     },
                     {
-                        range: `RekapSIMOPS!H${rowIndex}`, // Column H = Waktu_Input
-                        values: [[waktuInputData]]
+                        range: `RekapSIMOPS!G${rowIndex}`, // Column G = Detail_Mitigasi_JSON
+                        values: [[JSON.stringify(updatedMitigasiData)]]
                     }
+                    // Note: Waktu_Input (Column H) sudah di-set saat /api/simops dipanggil
                 ]
             }
         });
@@ -1105,7 +1131,7 @@ app.post('/api/simops/mitigasi-ganti-jam', async (req, res) => {
     }
 });
 
-// Save other mitigation
+// Save other mitigation (UPDATED - Fix Waktu_Input)
 app.post('/api/simops/mitigasi-lainnya', async (req, res) => {
     try {
         const { simopsId, area, namaSO, namaSI, leader, jumlahPekerja } = req.body;
@@ -1117,7 +1143,7 @@ app.post('/api/simops/mitigasi-lainnya', async (req, res) => {
         // Find the SIMOPS record
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'RekapSIMOPS!A2:H',
+            range: 'RekapSIMOPS!A2:I',
         });
 
         const rows = response.data.values || [];
@@ -1137,6 +1163,7 @@ app.post('/api/simops/mitigasi-lainnya', async (req, res) => {
 
         // Prepare mitigation data
         const mitigationData = {
+            type: 'Mitigasi Tambahan',
             namaSO: namaSO || [],
             namaSI: namaSI || [],
             leader: leader || '',
@@ -1145,7 +1172,8 @@ app.post('/api/simops/mitigasi-lainnya', async (req, res) => {
 
         const detailMitigasiJSON = JSON.stringify(mitigationData);
 
-        // Update RekapSIMOPS
+        // Update RekapSIMOPS - Keputusan dan Detail_Mitigasi saja
+        // Waktu_Input sudah di-set saat /api/simops dipanggil
         await sheets.spreadsheets.values.batchUpdate({
             spreadsheetId: SPREADSHEET_ID,
             requestBody: {
@@ -1153,7 +1181,7 @@ app.post('/api/simops/mitigasi-lainnya', async (req, res) => {
                 data: [
                     {
                         range: `RekapSIMOPS!E${rowIndex}`, // Column E = Keputusan_Pengendalian
-                        values: [['Mitigasi Lainnya']]
+                        values: [['Mitigasi Tambahan']]
                     },
                     {
                         range: `RekapSIMOPS!G${rowIndex}`, // Column G = Detail_Mitigasi_JSON
@@ -1174,11 +1202,11 @@ app.post('/api/simops/mitigasi-lainnya', async (req, res) => {
     }
 });
 
-// Get SIMOPS recap data
+// Get SIMOPS recap data (UPDATED - Include keputusanPengendalian check)
 app.get('/api/simops/rekap', async (req, res) => {
     try {
         const { simopsId } = req.query;
-        // Ambil range lebih luas (A sampai I)
+        // Ambil range A sampai I
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
             range: 'RekapSIMOPS!A2:I',
@@ -1189,21 +1217,25 @@ app.get('/api/simops/rekap', async (req, res) => {
         let rekapData = rows
             .filter(row => row[0])
             .map(row => {
-                let dataRisiko = {};     // Dari Kolom G (Gabungan Risk)
-                let dataResidual = null; // Dari Kolom I (Residual Risk)
+                let dataRisiko = {};      // Dari Kolom F (Data_Risiko_JSON)
+                let detailMitigasi = {};  // Dari Kolom G (Detail_Mitigasi_JSON)
+                let dataResidual = null;  // Dari Kolom I (RiskResidual)
 
-                try { if (row[6]) dataRisiko = JSON.parse(row[6]); } catch (e) { }
+                try { if (row[5]) dataRisiko = JSON.parse(row[5]); } catch (e) { }
+                try { if (row[6]) detailMitigasi = JSON.parse(row[6]); } catch (e) { }
                 try { if (row[8]) dataResidual = JSON.parse(row[8]); } catch (e) { }
 
                 return {
-                    idSimops: row[0],
-                    tanggal: row[1],
-                    area: row[2],
-                    konflikAntara: row[3],
-                    keputusan: row[4],
-                    dataRisiko: dataRisiko,
-                    waktuInput: row[7],
-                    dataResidual: dataResidual // Include data residual
+                    idSimops: row[0],                              // A
+                    tanggal: row[1],                               // B
+                    area: row[2],                                  // C
+                    konflikAntara: row[3],                         // D
+                    keputusan: row[4] || '',                       // E (Keputusan_Pengendalian)
+                    keputusanPengendalian: row[4] || '',           // E (alias untuk compatibility)
+                    dataRisiko: dataRisiko,                        // F
+                    detailMitigasi: detailMitigasi,                // G
+                    waktuInput: row[7] || '',                      // H
+                    dataResidual: dataResidual                     // I
                 };
             });
 
