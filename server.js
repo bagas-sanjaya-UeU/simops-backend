@@ -445,7 +445,8 @@ app.put('/api/jobs/:id/approve', async (req, res) => {
 
 app.get('/api/rekap', async (req, res) => {
     try {
-        const { area, unit } = req.query;
+        const { area, unit, today } = req.query;
+        const todayStr = getDateStr();
 
         // Ambil Data Secara Paralel agar Cepat
         const [resJobs, resRisks, resDocs] = await Promise.all([
@@ -490,6 +491,7 @@ app.get('/api/rekap', async (req, res) => {
             const jobArea = row[7] || ''; // Column H (index 7) = Area
             const jobUnit = row[3] || ''; // Column D (index 3) = Unit
             const statusKelengkapan = row[14] || 'Belum Lengkap';
+            const tanggalKerja = row[9] || '';
 
             // Filter by Status_Kelengkapan = "Lengkap"
             if (statusKelengkapan !== 'Lengkap') return null;
@@ -499,6 +501,9 @@ app.get('/api/rekap', async (req, res) => {
 
             // Filter by unit if parameter is provided
             if (unit && jobUnit !== unit) return null;
+
+            // Filter hanya hari ini jika diminta
+            if (today && String(today).trim() !== '' && tanggalKerja !== todayStr) return null;
 
             const riskInfo = jobRiskMap[id] || { maxL: 0, maxC: 0, details: [] };
 
@@ -512,7 +517,7 @@ app.get('/api/rekap', async (req, res) => {
                 pekerjaan: row[6],
                 area: jobArea,
                 pj: row[8],
-                tanggal: row[9],
+                tanggal: tanggalKerja,
                 jamMulai: row[10], // Pastikan format HH:mm di sheet
                 jamSelesai: row[11],
                 statusDoc: row[12] || "Belum Lengkap",
@@ -1054,66 +1059,21 @@ app.get('/api/simops/conflicts', async (req, res) => {
                 jamSelesai: row[11] || '' // Column L (index 11)
             }));
 
-        // Group jobs by overlapping time slots
+        // Group jobs by EXACT same time slots (jamMulai & jamSelesai)
+        const slotMap = new Map();
+        for (const job of filteredJobs) {
+            const key = `${date}|${area}|${job.jamMulai}|${job.jamSelesai}`;
+            if (!slotMap.has(key)) slotMap.set(key, []);
+            slotMap.get(key).push(job);
+        }
+
         const conflicts = [];
-        const processed = new Set();
-
-        for (let i = 0; i < filteredJobs.length; i++) {
-            if (processed.has(i)) continue;
-
-            const job1 = filteredJobs[i];
-            const conflictGroup = [job1];
-            processed.add(i);
-
-            // Parse time for job1
-            const [h1Start, m1Start] = (job1.jamMulai || '00:00').split(':').map(Number);
-            const [h1End, m1End] = (job1.jamSelesai || '00:00').split(':').map(Number);
-            const start1 = h1Start * 60 + m1Start;
-            const end1 = h1End * 60 + m1End;
-
-            // Find overlapping jobs
-            for (let j = i + 1; j < filteredJobs.length; j++) {
-                if (processed.has(j)) continue;
-
-                const job2 = filteredJobs[j];
-                const [h2Start, m2Start] = (job2.jamMulai || '00:00').split(':').map(Number);
-                const [h2End, m2End] = (job2.jamSelesai || '00:00').split(':').map(Number);
-                const start2 = h2Start * 60 + m2Start;
-                const end2 = h2End * 60 + m2End;
-
-                // Check for overlap
-                if (!(end1 <= start2 || end2 <= start1)) {
-                    conflictGroup.push(job2);
-                    processed.add(j);
-                }
-            }
-
-            // Only add to conflicts if there are 2 or more jobs in the group
-            if (conflictGroup.length >= 2) {
-                // Calculate the actual overlap period
-                let minStart = start1;
-                let maxEnd = end1;
-
-                for (const job of conflictGroup) {
-                    const [hStart, mStart] = (job.jamMulai || '00:00').split(':').map(Number);
-                    const [hEnd, mEnd] = (job.jamSelesai || '00:00').split(':').map(Number);
-                    const start = hStart * 60 + mStart;
-                    const end = hEnd * 60 + mEnd;
-
-                    minStart = Math.min(minStart, start);
-                    maxEnd = Math.max(maxEnd, end);
-                }
-
-                const formatTime = (minutes) => {
-                    const h = Math.floor(minutes / 60);
-                    const m = minutes % 60;
-                    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-                };
-
-                const timeSlot = `${formatTime(minStart)}-${formatTime(maxEnd)}`;
+        for (const [key, jobsInSlot] of slotMap.entries()) {
+            if (jobsInSlot.length >= 2) {
+                const [, , jm, js] = key.split('|');
                 conflicts.push({
-                    timeSlot: timeSlot,
-                    jobs: conflictGroup
+                    timeSlot: `${jm}-${js}`,
+                    jobs: jobsInSlot
                 });
             }
         }
@@ -1331,6 +1291,16 @@ app.get('/api/simops/rekap', async (req, res) => {
                 try { if (row[6]) detailMitigasi = JSON.parse(row[6]); } catch (e) { }
                 try { if (row[8]) dataResidual = JSON.parse(row[8]); } catch (e) { }
 
+                // Hitung status pengendalian berdasarkan RR residual vs RR gabungan
+                let combinedRR = 0;
+                if (typeof dataRisiko?.rr === 'number') combinedRR = dataRisiko.rr;
+                else if (typeof dataRisiko?.combinedRR === 'number') combinedRR = dataRisiko.combinedRR;
+                else if (typeof dataRisiko?.maxL === 'number' && typeof dataRisiko?.maxC === 'number') combinedRR = dataRisiko.maxL * dataRisiko.maxC;
+                const residualRR = (dataResidual && typeof dataResidual.rr === 'number') ? dataResidual.rr : null;
+                const statusPengendalian = (residualRR !== null)
+                    ? ((residualRR < combinedRR) ? 'SIMOPS Terkendali' : 'Belum Terkendali')
+                    : '';
+
                 return {
                     idSimops: row[0],                              // A
                     tanggal: row[1],                               // B
@@ -1341,7 +1311,9 @@ app.get('/api/simops/rekap', async (req, res) => {
                     dataRisiko: dataRisiko,                        // F
                     detailMitigasi: detailMitigasi,                // G
                     waktuInput: row[7] || '',                      // H
-                    dataResidual: dataResidual                     // I
+                    dataResidual: dataResidual,                    // I
+                    statusPengendalian: statusPengendalian,
+                    combinedRR: combinedRR
                 };
             });
 
