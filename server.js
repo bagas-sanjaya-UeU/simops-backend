@@ -445,7 +445,7 @@ app.put('/api/jobs/:id/approve', async (req, res) => {
 
 app.get('/api/rekap', async (req, res) => {
     try {
-        const { area, unit, today, date, onlyComplete } = req.query;
+        const { area, unit, today } = req.query;
         const todayStr = getDateStr();
 
         // Ambil Data Secara Paralel agar Cepat
@@ -488,26 +488,22 @@ app.get('/api/rekap', async (req, res) => {
         const result = jobs.map(row => {
             if (!row[0]) return null;
             const id = row[0];
-            const jobArea = (row[7] || '').trim(); // Column H (index 7) = Area
-            const jobUnit = (row[3] || '').trim(); // Column D (index 3) = Unit
-            const statusKelengkapan = (row[14] || 'Belum Lengkap').trim();
-            const tanggalKerja = (row[9] || '').trim();
+            const jobArea = row[7] || ''; // Column H (index 7) = Area
+            const jobUnit = row[3] || ''; // Column D (index 3) = Unit
+            const statusKelengkapan = row[14] || 'Belum Lengkap';
+            const tanggalKerja = row[9] || '';
 
-            // Filter by Status_Kelengkapan only when requested
-            const requireComplete = String(onlyComplete || '0') === '1';
-            if (requireComplete && statusKelengkapan !== 'Lengkap') return null;
+            // Filter by Status_Kelengkapan = "Lengkap"
+            if (statusKelengkapan !== 'Lengkap') return null;
 
             // Filter by area if parameter is provided
-            if (area && jobArea.toLowerCase() !== String(area).trim().toLowerCase()) return null;
+            if (area && jobArea !== area) return null;
 
             // Filter by unit if parameter is provided
-            if (unit && jobUnit.toLowerCase() !== String(unit).trim().toLowerCase()) return null;
+            if (unit && jobUnit !== unit) return null;
 
             // Filter hanya hari ini jika diminta
             if (today && String(today).trim() !== '' && tanggalKerja !== todayStr) return null;
-
-            // Or filter by a specific date if provided
-            if (date && String(date).trim() !== '' && tanggalKerja !== String(date).trim()) return null;
 
             const riskInfo = jobRiskMap[id] || { maxL: 0, maxC: 0, details: [] };
 
