@@ -225,9 +225,9 @@ app.post('/api/jobs', async (req, res) => {
         let tglKerja = form.tanggalKerja;
         if (tglKerja) tglKerja = format(new Date(tglKerja), 'dd/MM/yyyy');
 
-        // Order: ID, Timestamp, Kompartemen, Unit, Nama_PT, Jenis_Pekerjaan, Nama_Pekerjaan, Area, PJ, Tanggal_Kerja, Jam_Mulai, Jam_Selesai, Status_Dokumen, Status_Risiko, Status_Kelengkapan
+        // Order: ID, Timestamp, Nama_PT, Kompartemen, Unit, Jenis_Pekerjaan, Nama_Pekerjaan, Area, PJ, Tanggal_Kerja, Jam_Mulai, Jam_Selesai, Status_Dokumen, Status_Risiko, Status_Kelengkapan
         const values = [
-            idUnik, timestamp, form.kompartemen, form.unit, form.namaPT,
+            idUnik, timestamp, form.namaPT, form.kompartemen, form.unit,
             form.jenisPekerjaan, form.namaPekerjaan, form.area, form.pjNama,
             tglKerja, form.jamMulai, form.jamSelesai,
             "Belum Lengkap", "Belum Dinilai", "Belum Lengkap" // Added Status_Kelengkapan
