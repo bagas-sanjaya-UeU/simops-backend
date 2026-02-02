@@ -445,8 +445,12 @@ app.put('/api/jobs/:id/approve', async (req, res) => {
 
 app.get('/api/rekap', async (req, res) => {
     try {
-        const { area, unit, today } = req.query;
+        const { area, unit, today, date, onlyComplete } = req.query;
         const todayStr = getDateStr();
+        const dateParam = typeof date === 'string' ? date.trim() : '';
+        const todayFlag = typeof today !== 'undefined' && String(today).trim() !== '' && String(today).toLowerCase() !== 'false';
+        const targetDate = dateParam || (todayFlag ? todayStr : '');
+        const requireComplete = String(onlyComplete || '').trim() === '1' || String(onlyComplete || '').toLowerCase() === 'true';
 
         // Ambil Data Secara Paralel agar Cepat
         const [resJobs, resRisks, resDocs] = await Promise.all([
@@ -489,12 +493,12 @@ app.get('/api/rekap', async (req, res) => {
             if (!row[0]) return null;
             const id = row[0];
             const jobArea = row[7] || ''; // Column H (index 7) = Area
-            const jobUnit = row[3] || ''; // Column D (index 3) = Unit
+            const jobUnit = row[4] || ''; // Column E (index 4) = Unit
             const statusKelengkapan = row[14] || 'Belum Lengkap';
             const tanggalKerja = row[9] || '';
 
-            // Filter by Status_Kelengkapan = "Lengkap"
-            if (statusKelengkapan !== 'Lengkap') return null;
+            // Filter by Status_Kelengkapan jika diminta
+            if (requireComplete && statusKelengkapan !== 'Lengkap') return null;
 
             // Filter by area if parameter is provided
             if (area && jobArea !== area) return null;
@@ -502,17 +506,17 @@ app.get('/api/rekap', async (req, res) => {
             // Filter by unit if parameter is provided
             if (unit && jobUnit !== unit) return null;
 
-            // Filter hanya hari ini jika diminta
-            if (today && String(today).trim() !== '' && tanggalKerja !== todayStr) return null;
+            // Filter by date if parameter is provided
+            if (targetDate && tanggalKerja !== targetDate) return null;
 
             const riskInfo = jobRiskMap[id] || { maxL: 0, maxC: 0, details: [] };
 
             return {
                 id: id,
                 timestamp: row[1],
-                kompartemen: row[2],
-                unit: row[3],
-                namaPT: row[4],
+                kompartemen: row[3],
+                unit: row[4],
+                namaPT: row[2],
                 jenis: row[5],
                 pekerjaan: row[6],
                 area: jobArea,
