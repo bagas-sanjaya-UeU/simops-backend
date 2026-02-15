@@ -9,7 +9,7 @@ const { format } = require('date-fns');
 
 
 const app = express();
-// --- TAMBAHAN DEBUGGING (Letakkan disini) ----
+// --- TAMBAHAN DEBUGGING (Letakkan disini) ---
 try {
     const keyPath = process.env.GOOGLE_KEY_FILE;
     const creds = require(keyPath);
@@ -44,6 +44,11 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 let DRIVE_FOLDER_ID = null; // Akan di-set saat server start
 
 const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzTu2gysoQqx7PQ6bK-ccfVPSQMy54VZbILhmSYdbbaZBvDYjJTp-oIRjdSt3faHW46ZA/exec";
+
+function isDokumenLengkap(statusDokumen) {
+    const normalized = String(statusDokumen || '').trim();
+    return normalized === 'Dokumen Terupload' || normalized === 'Dokumen Tersimpan' || normalized === 'APPROVED';
+}
 
 // --- HELPER: Get or Create Upload Folder ---
 async function getOrCreateUploadFolder() {
@@ -415,10 +420,9 @@ async function checkAndUpdateKelengkapan(idPekerjaan) {
 
         if (job && rowIndex !== -1) {
             const statusDokumen = job[12] || '';
-            const statusRisiko = job[13] || '';
 
-            // Check if both are complete
-            if (statusDokumen === 'Dokumen Terupload' && statusRisiko === 'Sudah Dinilai') {
+            // Input pekerjaan dianggap lengkap jika dokumen sudah terupload
+            if (isDokumenLengkap(statusDokumen)) {
                 // Update Status_Kelengkapan (column O = index 14)
                 await updateStatusPekerjaan(idPekerjaan, 14, 'Lengkap');
             }
@@ -782,12 +786,11 @@ app.get('/api/notifications', async (req, res) => {
                 if (!row[0]) return false;
                 const tanggalKerja = row[9] || ''; // Column J (index 9)
                 const statusDokumen = row[12] || ''; // Column M (index 12)
-                const statusRisiko = row[13] || ''; // Column N (index 13)
 
-                // Check if job is for today and incomplete
+                // Check if job is for today and document is incomplete
                 return (
                     tanggalKerja === todayDate &&
-                    (statusDokumen !== 'Dokumen Tersimpan' || statusRisiko !== 'Sudah Dinilai')
+                    !isDokumenLengkap(statusDokumen)
                 );
             })
             .map(row => ({
@@ -804,9 +807,7 @@ app.get('/api/notifications', async (req, res) => {
                 jamSelesai: row[11],
                 statusDoc: row[12] || 'Belum Lengkap',
                 statusRisk: row[13] || 'Belum Dinilai',
-                message: row[12] !== 'Dokumen Tersimpan'
-                    ? 'Dokumen belum lengkap'
-                    : 'Penilaian risiko belum selesai'
+                message: 'Dokumen belum lengkap'
             }));
 
         res.json({
