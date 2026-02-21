@@ -328,6 +328,66 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     }
 });
 
+app.post('/api/persetujuan', async (req, res) => {
+    try {
+        const {
+            namaMenyetujui,
+            badge,
+            unit,
+            statusPersetujuan,
+            fileData,
+            namaFile
+        } = req.body || {};
+
+        if (!namaMenyetujui || !badge || !unit || !statusPersetujuan || !fileData) {
+            return res.status(400).json({ error: 'Data persetujuan tidak lengkap.' });
+        }
+
+        if (!String(fileData).startsWith('data:application/pdf;base64,')) {
+            return res.status(400).json({ error: 'Format PDF tidak valid.' });
+        }
+
+        const safeNama = String(namaMenyetujui).trim();
+        const safeBadge = String(badge).trim();
+        const safeUnit = String(unit).trim();
+        const safeStatus = String(statusPersetujuan).trim();
+        const finalNamaFile = namaFile || `Persetujuan_${safeNama.replace(/\s+/g, '_')}.pdf`;
+
+        const gasResponse = await fetch(GAS_WEB_APP_URL, {
+            method: 'POST',
+            redirect: 'follow',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+                action: 'upload-persetujuan',
+                fileData: fileData,
+                namaFile: finalNamaFile,
+                // Menyesuaikan urutan argumen App Script yang dikirim user
+                badge: safeNama,
+                unit: safeBadge,
+                namaMenyetujui: safeUnit,
+                statusPersetujuan: safeStatus,
+                originalNamaMenyetujui: safeNama,
+                originalBadge: safeBadge,
+                originalUnit: safeUnit
+            })
+        });
+
+        const result = await gasResponse.json();
+
+        if (result.status === 'Sukses') {
+            return res.json({
+                message: 'Persetujuan berhasil diproses.',
+                fileUrl: result.message
+            });
+        }
+
+        throw new Error(result.message || 'Gagal upload persetujuan ke GAS');
+    } catch (error) {
+        console.error('Error /api/persetujuan:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ==========================================
 // 4. DATA RISIKO (Input Risk)
 // ==========================================
