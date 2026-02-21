@@ -26,7 +26,8 @@ try {
 const upload = multer({ storage: multer.memoryStorage() }); // Simpan file di RAM sementara
 
 app.use(cors()); // Agar bisa diakses dari Vercel
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // --- KONFIGURASI GOOGLE ---
 const auth = new google.auth.GoogleAuth({
