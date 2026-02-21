@@ -344,7 +344,10 @@ app.post('/api/persetujuan', async (req, res) => {
             return res.status(400).json({ error: 'Data persetujuan tidak lengkap.' });
         }
 
-        if (!String(fileData).startsWith('data:application/pdf;base64,')) {
+        const fileDataStr = String(fileData || '');
+        const isPdfDataUri = /^data:application\/pdf(?:;[^,]*)?,/i.test(fileDataStr);
+        const hasBase64Marker = /;base64,/i.test(fileDataStr);
+        if (!isPdfDataUri || !hasBase64Marker) {
             return res.status(400).json({ error: 'Format PDF tidak valid.' });
         }
 
