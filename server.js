@@ -340,7 +340,7 @@ app.post('/api/persetujuan', async (req, res) => {
             namaFile
         } = req.body || {};
 
-        if (!namaMenyetujui || !badge || !unit || !statusPersetujuan || !fileData) {
+        if (!namaMenyetujui || !badge || !statusPersetujuan || !fileData) {
             return res.status(400).json({ error: 'Data persetujuan tidak lengkap.' });
         }
 
@@ -353,7 +353,7 @@ app.post('/api/persetujuan', async (req, res) => {
 
         const safeNama = String(namaMenyetujui).trim();
         const safeBadge = String(badge).trim();
-        const safeUnit = String(unit).trim();
+        const safeUnit = String(unit || '-').trim() || '-';
         const safeStatus = String(statusPersetujuan).trim();
         const finalNamaFile = namaFile || `Persetujuan_${safeNama.replace(/\s+/g, '_')}.pdf`;
 
