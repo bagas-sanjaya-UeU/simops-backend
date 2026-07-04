@@ -560,7 +560,13 @@ async function checkAndUpdateKelengkapan(idPekerjaan, isLanjutan = false) {
         }
 
         // Check if all required documents are uploaded
+        const uploadedArray = Array.from(uploadedDocTypes);
+        console.log(`[Kelengkapan Check] ID: ${idPekerjaan}, Lanjutan: ${isLanjutan}`);
+        console.log(`[Kelengkapan Check] Required: ${requiredDocs.join(', ')}`);
+        console.log(`[Kelengkapan Check] Uploaded: ${uploadedArray.join(', ')}`);
+
         const allUploaded = requiredDocs.every(doc => uploadedDocTypes.has(doc));
+        console.log(`[Kelengkapan Check] allUploaded: ${allUploaded}`);
 
         if (allUploaded) {
             // Update Status_Kelengkapan
