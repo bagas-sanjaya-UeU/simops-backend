@@ -231,17 +231,17 @@ app.post('/api/jobs', async (req, res) => {
         let tglKerja = form.tanggalKerja;
         if (tglKerja) tglKerja = format(new Date(tglKerja), 'dd/MM/yyyy');
 
-        // Order: ID, Timestamp, Nama_PT, Kompartemen, Unit, Jenis_Pekerjaan, Nama_Pekerjaan, Area, PJ, Tanggal_Kerja, Jam_Mulai, Jam_Selesai, Status_Dokumen, Status_Risiko, Status_Kelengkapan
+        // Order: A:ID, B:Timestamp, C:Nama_PT, D:Kompartemen, E:Unit, F:Jenis_Pekerjaan, G:Nama_Pekerjaan, H:Aktivitas_Pekerjaan, I:Area, J:PJ, K:Tanggal_Kerja, L:Jam_Mulai, M:Jam_Selesai, N:Status_Dokumen, O:Status_Risiko, P:Status_Kelengkapan
         const values = [
             idUnik, timestamp, form.namaPT, form.kompartemen, form.unit,
-            form.jenisPekerjaan, form.namaPekerjaan, form.area, form.pjNama,
+            form.jenisPekerjaan, form.namaPekerjaan, form.aktivitasPekerjaan, form.area, form.pjNama,
             tglKerja, form.jamMulai, form.jamSelesai,
-            "Belum Lengkap", "Belum Dinilai", "Belum Lengkap" // Added Status_Kelengkapan
+            "Belum Lengkap", "Belum Dinilai", "Belum Lengkap"
         ];
 
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataPekerjaan!A:O',
+            range: 'DataPekerjaan!A:P',
             valueInputOption: 'USER_ENTERED',
             requestBody: { values: [values] }
         });
@@ -286,7 +286,7 @@ app.get('/api/test-drive', async (req, res) => {
 
 app.post('/api/upload', upload.single('file'), async (req, res) => {
     try {
-        const { idPekerjaan, jenisDokumen } = req.body;
+        const { idPekerjaan, jenisDokumen, isLanjutan } = req.body;
         const file = req.file;
 
         if (!file) return res.status(400).send('No file uploaded.');
@@ -314,9 +314,13 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
         // 3. Cek respon dari GAS
         if (result.status === 'Sukses') {
-            // Check and update Status_Kelengkapan after successful upload
-            // The GAS script should already update Status_Dokumen, so we check completion here
-            await checkAndUpdateKelengkapan(idPekerjaan);
+            // FIX: Explicitly update Status_Dokumen (column N, index 13) to "Dokumen Terupload"
+            // This fixes the bug where GAS was writing to the wrong column
+            await updateStatusPekerjaan(idPekerjaan, 13, 'Dokumen Terupload');
+
+            // Check and update Status_Kelengkapan based on all uploaded documents
+            const lanjutan = isLanjutan === 'true' || isLanjutan === true;
+            await checkAndUpdateKelengkapan(idPekerjaan, lanjutan);
 
             res.json({ message: 'Berhasil upload via GAS', url: result.message });
         } else {
@@ -411,8 +415,8 @@ app.post('/api/risks', async (req, res) => {
             requestBody: { values: rowsToAdd }
         });
 
-        // Update Status di Sheet DataPekerjaan (Kolom N / Index 13)
-        await updateStatusPekerjaan(idPekerjaan, 13, "Sudah Dinilai");
+        // Update Status di Sheet DataPekerjaan (Kolom O / Index 14)
+        await updateStatusPekerjaan(idPekerjaan, 14, "Sudah Dinilai");
 
         // Check and update Status_Kelengkapan
         await checkAndUpdateKelengkapan(idPekerjaan);
@@ -461,35 +465,44 @@ async function updateStatusPekerjaan(id, colIndex, val) {
 }
 
 // Helper function to check and update Status_Kelengkapan
-async function checkAndUpdateKelengkapan(idPekerjaan) {
+// Checks DokumenIzin sheet to see if all required documents are uploaded
+async function checkAndUpdateKelengkapan(idPekerjaan, isLanjutan = false) {
     try {
-        // Get the job data
-        const res = await sheets.spreadsheets.values.get({
+        // Get uploaded documents from DokumenIzin sheet
+        const resDocs = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'DataPekerjaan!A:O',
+            range: 'DokumenIzin!A2:D',
         });
 
-        const rows = res.data.values;
-        let rowIndex = -1;
-        let job = null;
+        const docs = resDocs.data.values || [];
 
-        // Find the job
-        for (let i = 0; i < rows.length; i++) {
-            if (rows[i][0] === idPekerjaan) {
-                rowIndex = i + 1;
-                job = rows[i];
-                break;
+        // Find all documents uploaded for this job
+        const uploadedDocTypes = new Set();
+        docs.forEach(d => {
+            if (d[0] === idPekerjaan && d[1]) {
+                uploadedDocTypes.add(d[1].trim());
             }
+        });
+
+        // Determine required documents
+        // Pekerjaan Lanjutan: hanya perlu WP
+        // Pekerjaan biasa: perlu WP, JSA, PJA
+        let requiredDocs;
+        if (isLanjutan) {
+            requiredDocs = ['Work Permit'];
+        } else {
+            requiredDocs = ['Work Permit', 'JSA', 'PJA'];
         }
 
-        if (job && rowIndex !== -1) {
-            const statusDokumen = job[12] || '';
+        // Check if all required documents are uploaded
+        const allUploaded = requiredDocs.every(doc => uploadedDocTypes.has(doc));
 
-            // Input pekerjaan dianggap lengkap jika dokumen sudah terupload
-            if (isDokumenLengkap(statusDokumen)) {
-                // Update Status_Kelengkapan (column O = index 14)
-                await updateStatusPekerjaan(idPekerjaan, 14, 'Lengkap');
-            }
+        if (allUploaded) {
+            // Update Status_Kelengkapan (column P = index 15) to "Lengkap"
+            await updateStatusPekerjaan(idPekerjaan, 15, 'Lengkap');
+        } else {
+            // Ensure Status_Kelengkapan reflects "Belum Lengkap" if not all docs uploaded
+            await updateStatusPekerjaan(idPekerjaan, 15, 'Belum Lengkap');
         }
     } catch (error) {
         console.error('Error updating kelengkapan:', error);
@@ -500,7 +513,7 @@ async function checkAndUpdateKelengkapan(idPekerjaan) {
 app.put('/api/jobs/:id/approve', async (req, res) => {
     try {
         const { id } = req.params;
-        await updateStatusPekerjaan(id, 12, "APPROVED");
+        await updateStatusPekerjaan(id, 13, "APPROVED");
         res.json({ message: "Dokumen Disetujui Inspector" });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -560,10 +573,10 @@ app.get('/api/rekap', async (req, res) => {
         const result = jobs.map(row => {
             if (!row[0]) return null;
             const id = row[0];
-            const jobArea = row[7] || ''; // Column H (index 7) = Area
+            const jobArea = row[8] || ''; // Column I (index 8) = Area
             const jobUnit = row[4] || ''; // Column E (index 4) = Unit
-            const statusKelengkapan = row[14] || 'Belum Lengkap';
-            const tanggalKerja = row[9] || '';
+            const statusKelengkapan = row[15] || 'Belum Lengkap'; // Column P (index 15)
+            const tanggalKerja = row[10] || ''; // Column K (index 10) = Tanggal Kerja
 
             // Filter by Status_Kelengkapan jika diminta
             if (requireComplete && statusKelengkapan !== 'Lengkap') return null;
@@ -587,14 +600,15 @@ app.get('/api/rekap', async (req, res) => {
                 namaPT: row[2],
                 jenis: row[5],
                 pekerjaan: row[6],
+                aktivitas: row[7] || '', // Added aktivitasPekerjaan
                 area: jobArea,
-                pj: row[8],
+                pj: row[9], // Column J
                 tanggal: tanggalKerja,
-                jamMulai: row[10], // Pastikan format HH:mm di sheet
-                jamSelesai: row[11],
-                statusDoc: row[12] || "Belum Lengkap",
-                statusRisk: row[13] || "Belum Dinilai",
-                statusKelengkapan: statusKelengkapan,
+                jamMulai: row[11], // Column L
+                jamSelesai: row[12], // Column M
+                statusDoc: row[13] || "Belum Lengkap", // Column N
+                statusRisk: row[14] || "Belum Dinilai", // Column O
+                statusKelengkapan: statusKelengkapan, // Column P
                 riskData: riskInfo,
                 docs: jobDocMap[id] || []
             };
