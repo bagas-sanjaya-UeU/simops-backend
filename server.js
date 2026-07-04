@@ -284,15 +284,7 @@ app.post('/api/jobs', async (req, res) => {
         let tglKerja = form.tanggalKerja;
         if (tglKerja) tglKerja = format(new Date(tglKerja), 'dd/MM/yyyy');
 
-<<<<<<< HEAD
         // Order: A:ID, B:Timestamp, C:Nama_PT, D:Kompartemen, E:Unit, F:Jenis_Pekerjaan, G:Nama_Pekerjaan, H:Aktivitas_Pekerjaan, I:Area, J:PJ, K:Tanggal_Kerja, L:Jam_Mulai, M:Jam_Selesai, N:Status_Dokumen, O:Status_Risiko, P:Status_Kelengkapan
-        const values = [
-            idUnik, timestamp, form.namaPT, form.kompartemen, form.unit,
-            form.jenisPekerjaan, form.namaPekerjaan, form.aktivitasPekerjaan, form.area, form.pjNama,
-            tglKerja, form.jamMulai, form.jamSelesai,
-            "Belum Lengkap", "Belum Dinilai", "Belum Lengkap"
-=======
-        // Order: ID, Timestamp, Nama_PT, Kompartemen, Unit, Jenis_Pekerjaan, Nama_Pekerjaan, Aktivitas_Pekerjaan, Area, PJ, Tanggal_Kerja, Jam_Mulai, Jam_Selesai, Status_Dokumen, Status_Risiko, Status_Kelengkapan
         const values = [
             idUnik,
             timestamp,
@@ -310,16 +302,11 @@ app.post('/api/jobs', async (req, res) => {
             "Belum Lengkap",
             "Belum Dinilai",
             "Belum Lengkap"
->>>>>>> 701a6c5dd2d8d1971cdabc0d97754a7759f7ac40
         ];
 
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-<<<<<<< HEAD
-            range: 'DataPekerjaan!A:P',
-=======
             range: JOB_RANGE,
->>>>>>> 701a6c5dd2d8d1971cdabc0d97754a7759f7ac40
             valueInputOption: 'USER_ENTERED',
             requestBody: { values: [values] }
         });
@@ -494,11 +481,7 @@ app.post('/api/risks', async (req, res) => {
         });
 
         // Update Status di Sheet DataPekerjaan (Kolom O / Index 14)
-<<<<<<< HEAD
-        await updateStatusPekerjaan(idPekerjaan, 14, "Sudah Dinilai");
-=======
         await updateStatusPekerjaan(idPekerjaan, JOB_INDEX.statusRisk, "Sudah Dinilai");
->>>>>>> 701a6c5dd2d8d1971cdabc0d97754a7759f7ac40
 
         // Check and update Status_Kelengkapan
         await checkAndUpdateKelengkapan(idPekerjaan);
@@ -553,11 +536,7 @@ async function checkAndUpdateKelengkapan(idPekerjaan, isLanjutan = false) {
         // Get uploaded documents from DokumenIzin sheet
         const resDocs = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-<<<<<<< HEAD
             range: 'DokumenIzin!A2:D',
-=======
-            range: JOB_RANGE,
->>>>>>> 701a6c5dd2d8d1971cdabc0d97754a7759f7ac40
         });
 
         const docs = resDocs.data.values || [];
@@ -580,26 +559,15 @@ async function checkAndUpdateKelengkapan(idPekerjaan, isLanjutan = false) {
             requiredDocs = ['Work Permit', 'JSA', 'PJA'];
         }
 
-<<<<<<< HEAD
         // Check if all required documents are uploaded
         const allUploaded = requiredDocs.every(doc => uploadedDocTypes.has(doc));
 
         if (allUploaded) {
-            // Update Status_Kelengkapan (column P = index 15) to "Lengkap"
-            await updateStatusPekerjaan(idPekerjaan, 15, 'Lengkap');
+            // Update Status_Kelengkapan
+            await updateStatusPekerjaan(idPekerjaan, JOB_INDEX.statusKelengkapan, 'Lengkap');
         } else {
             // Ensure Status_Kelengkapan reflects "Belum Lengkap" if not all docs uploaded
-            await updateStatusPekerjaan(idPekerjaan, 15, 'Belum Lengkap');
-=======
-        if (job && rowIndex !== -1) {
-            const statusDokumen = job[JOB_INDEX.statusDokumen] || '';
-
-            // Input pekerjaan dianggap lengkap jika dokumen sudah terupload
-            if (isDokumenLengkap(statusDokumen)) {
-                // Update Status_Kelengkapan (column P = index 15)
-                await updateStatusPekerjaan(idPekerjaan, JOB_INDEX.statusKelengkapan, 'Lengkap');
-            }
->>>>>>> 701a6c5dd2d8d1971cdabc0d97754a7759f7ac40
+            await updateStatusPekerjaan(idPekerjaan, JOB_INDEX.statusKelengkapan, 'Belum Lengkap');
         }
     } catch (error) {
         console.error('Error updating kelengkapan:', error);
@@ -610,11 +578,7 @@ async function checkAndUpdateKelengkapan(idPekerjaan, isLanjutan = false) {
 app.put('/api/jobs/:id/approve', async (req, res) => {
     try {
         const { id } = req.params;
-<<<<<<< HEAD
-        await updateStatusPekerjaan(id, 13, "APPROVED");
-=======
         await updateStatusPekerjaan(id, JOB_INDEX.statusDokumen, "APPROVED");
->>>>>>> 701a6c5dd2d8d1971cdabc0d97754a7759f7ac40
         res.json({ message: "Dokumen Disetujui Inspector" });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -673,19 +637,11 @@ app.get('/api/rekap', async (req, res) => {
         // Mapping Data Final (Gabung semua)
         const result = jobs.map(row => {
             if (!row[0]) return null;
-<<<<<<< HEAD
-            const id = row[0];
-            const jobArea = row[8] || ''; // Column I (index 8) = Area
-            const jobUnit = row[4] || ''; // Column E (index 4) = Unit
-            const statusKelengkapan = row[15] || 'Belum Lengkap'; // Column P (index 15)
-            const tanggalKerja = row[10] || ''; // Column K (index 10) = Tanggal Kerja
-=======
             const id = row[JOB_INDEX.id];
             const jobArea = row[JOB_INDEX.area] || '';
             const jobUnit = row[JOB_INDEX.unit] || '';
             const statusKelengkapan = row[JOB_INDEX.statusKelengkapan] || 'Belum Lengkap';
             const tanggalKerja = row[JOB_INDEX.tanggalKerja] || '';
->>>>>>> 701a6c5dd2d8d1971cdabc0d97754a7759f7ac40
 
             // Filter by Status_Kelengkapan jika diminta
             if (requireComplete && statusKelengkapan !== 'Lengkap') return null;
@@ -703,30 +659,13 @@ app.get('/api/rekap', async (req, res) => {
 
             return {
                 id: id,
-<<<<<<< HEAD
-                timestamp: row[1],
-                kompartemen: row[3],
-                unit: row[4],
-                namaPT: row[2],
-                jenis: row[5],
-                pekerjaan: row[6],
-                aktivitas: row[7] || '', // Added aktivitasPekerjaan
-                area: jobArea,
-                pj: row[9], // Column J
-                tanggal: tanggalKerja,
-                jamMulai: row[11], // Column L
-                jamSelesai: row[12], // Column M
-                statusDoc: row[13] || "Belum Lengkap", // Column N
-                statusRisk: row[14] || "Belum Dinilai", // Column O
-                statusKelengkapan: statusKelengkapan, // Column P
-=======
                 timestamp: row[JOB_INDEX.timestamp],
                 kompartemen: row[JOB_INDEX.kompartemen],
                 unit: row[JOB_INDEX.unit],
                 namaPT: row[JOB_INDEX.namaPT],
                 jenis: row[JOB_INDEX.jenisPekerjaan],
                 pekerjaan: row[JOB_INDEX.namaPekerjaan],
-                aktivitasPekerjaan: row[JOB_INDEX.aktivitasPekerjaan] || '',
+                aktivitas: row[JOB_INDEX.aktivitasPekerjaan] || '',
                 area: jobArea,
                 pj: row[JOB_INDEX.pjNama],
                 tanggal: tanggalKerja,
@@ -735,7 +674,6 @@ app.get('/api/rekap', async (req, res) => {
                 statusDoc: row[JOB_INDEX.statusDokumen] || "Belum Lengkap",
                 statusRisk: row[JOB_INDEX.statusRisk] || "Belum Dinilai",
                 statusKelengkapan: statusKelengkapan,
->>>>>>> 701a6c5dd2d8d1971cdabc0d97754a7759f7ac40
                 riskData: riskInfo,
                 docs: jobDocMap[id] || []
             };
